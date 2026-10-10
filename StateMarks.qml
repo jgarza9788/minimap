@@ -17,25 +17,26 @@ Item {
   anchors.fill: parent
   readonly property bool roomy: width >= 10 && height >= 10
   readonly property real m: 2                                  // margin from the edge
+  readonly property real fm: 2.2                               // inset of the floating outline's centre line
   readonly property real arm: Math.max(2, Math.min(4, Math.min(width, height) / 3))
 
-  // floating: dashed outline
+  // floating: dashed outline (dash lengths are in multiples of the stroke width)
   Shape {
     anchors.fill: parent
     visible: marks.roomy && marks.floating && !marks.fullscreen
-    opacity: 0.8
     ShapePath {
       strokeColor: marks.ink
-      strokeWidth: 1
+      strokeWidth: 1.8
       fillColor: "transparent"
       strokeStyle: ShapePath.DashLine
-      dashPattern: [2, 2]
-      startX: marks.m + 0.5
-      startY: marks.m + 0.5
-      PathLine { x: marks.width - marks.m - 0.5; y: marks.m + 0.5 }
-      PathLine { x: marks.width - marks.m - 0.5; y: marks.height - marks.m - 0.5 }
-      PathLine { x: marks.m + 0.5; y: marks.height - marks.m - 0.5 }
-      PathLine { x: marks.m + 0.5; y: marks.m + 0.5 }
+      dashPattern: [2, 1.2]
+      capStyle: ShapePath.FlatCap
+      startX: marks.fm
+      startY: marks.fm
+      PathLine { x: marks.width - marks.fm; y: marks.fm }
+      PathLine { x: marks.width - marks.fm; y: marks.height - marks.fm }
+      PathLine { x: marks.fm; y: marks.height - marks.fm }
+      PathLine { x: marks.fm; y: marks.fm }
     }
   }
 
