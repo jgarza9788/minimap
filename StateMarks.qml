@@ -4,7 +4,7 @@ import QtQuick.Shapes
 // Tiny window-state marks drawn inside a box, no font needed:
 //   pinned      a dot in the top-right corner
 //   fullscreen  four corner brackets
-//   floating    a dashed outline just inside the edge
+//   floating    a solid outline just inside the edge
 // Hidden when the box is too small to carry them.
 Item {
   id: marks
@@ -20,7 +20,7 @@ Item {
   readonly property real fm: 2.2                               // inset of the floating outline's centre line
   readonly property real arm: Math.max(2, Math.min(4, Math.min(width, height) / 3))
 
-  // floating: dashed outline (dash lengths are in multiples of the stroke width)
+  // floating: solid outline
   Shape {
     anchors.fill: parent
     visible: marks.roomy && marks.floating && !marks.fullscreen
@@ -28,9 +28,8 @@ Item {
       strokeColor: marks.ink
       strokeWidth: 1.8
       fillColor: "transparent"
-      strokeStyle: ShapePath.DashLine
-      dashPattern: [2, 1.2]
-      capStyle: ShapePath.FlatCap
+      strokeStyle: ShapePath.SolidLine
+      joinStyle: ShapePath.RoundJoin
       startX: marks.fm
       startY: marks.fm
       PathLine { x: marks.width - marks.fm; y: marks.fm }
@@ -70,8 +69,9 @@ Item {
   // pinned: dot
   Rectangle {
     visible: marks.roomy && marks.pinned
-    x: marks.width - marks.m - 4
-    y: marks.m + (marks.fullscreen ? 3 : 0)
+    // inside the outline / brackets when there is one, so they never overlap
+    x: marks.width - marks.m - (marks.floating || marks.fullscreen ? 8 : 4)
+    y: marks.m + (marks.floating || marks.fullscreen ? 4 : 0)
     width: 4
     height: 4
     radius: 2

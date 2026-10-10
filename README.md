@@ -25,7 +25,7 @@ hover it. It also tells you when a window wants your attention: **amber** for mi
 | ![numbers](previews/numbers.png) | **Number styles:** `9`, `IX`, `九`, `.::::` |
 | ![menu](previews/menu.png) | **Box menu** (opt-in): right-click a box for focus, float, fullscreen, pin, move to workspace, close. |
 | ![workspaces](previews/move-to-workspace.png) | **Move to workspace** from the same menu - pick 1-10. |
-| ![markers](previews/markers.png) | **State markers:** a dashed outline for floating windows, a dot for pinned, corner brackets for fullscreen. |
+| ![markers](previews/markers.png) | **State markers:** a solid outline for floating windows, a dot for pinned, corner brackets for fullscreen. |
 
 ## Install
 
