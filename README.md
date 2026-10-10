@@ -23,6 +23,9 @@ hover it. It also tells you when a window wants your attention: **amber** for mi
 | ![critical](previews/critical.png) | **Critical alerts** turn it red, louder and faster. Focus the window and the alert clears with a little flourish. |
 | ![other](previews/other.png) | **Alert on another workspace?** The workspace number lights up so you know where to look. |
 | ![numbers](previews/numbers.png) | **Number styles:** `9`, `IX`, `九`, `.::::` |
+| ![menu](previews/menu.png) | **Box menu** (opt-in): right-click a box for focus, float, fullscreen, pin, move to workspace, close. |
+| ![workspaces](previews/move-to-workspace.png) | **Move to workspace** from the same menu - pick 1-10. |
+| ![markers](previews/markers.png) | **State markers:** a dashed outline for floating windows, a dot for pinned, corner brackets for fullscreen. |
 
 ## Install
 
@@ -42,9 +45,22 @@ draws a sensible map. Needs `python3` and either `busctl` (systemd) or `inotifyw
 
 ## Using it
 
-- **Left-click** a box (or a tab) to focus that window.
-- **Scroll** over the widget to change workspace.
-- **Right-click** for the settings popup.
+| | |
+|---|---|
+| **Left-click** a box or tab | focus that window |
+| **Scroll** over the widget | previous / next workspace |
+| **Click the number** | jump to whatever is alerting (critical first, then the newest) |
+| **Right-click** | settings (or the box menu when *Box actions* is on) |
+| **Middle-click** a box | close that window (*Box actions* on) |
+| **Right-drag** a box | move its column left or right (*Drag to reorder* on) |
+
+*Box actions* and *Drag to reorder* are off by default, because they close and rearrange your
+windows. Switch them on in the right-click settings. With *Box actions* on, the settings move to
+a right-click on the number or separator (and there is a "Settings..." row in the box menu).
+
+> Why the **right** button for dragging? Omarchy's bar uses a left-drag on any widget to move that
+> widget around the bar, so a left-drag never reaches the boxes. Left-*clicks* do, and the right
+> button is free.
 
 ## Settings
 
@@ -58,6 +74,9 @@ they are keys on the widget entry.
 | `animStyle` | `smooth` `cyberpunk` `fun` `magic` `ripple` | `smooth` | motion and effects (below) |
 | `attention` | `true` `false` | `true` | alert cues for urgent windows and notifications |
 | `showFloating` | `true` `false` | `false` | include floating windows in the map |
+| `stateMarkers` | `true` `false` | `true` | marks for fullscreen / pinned / floating windows |
+| `boxActions` | `true` `false` | `false` | right-click box menu and middle-click close |
+| `dragReorder` | `true` `false` | `false` | right-drag a box to reorder its column |
 | `maxWidth` | 60-600 | `200` | longest the box row may get (px); everything shrinks together past it |
 | `gap` | 0-12 | `3` | space between boxes (px) |
 
@@ -106,12 +125,29 @@ notify-send -a chromium -u normal   "Build finished" "all tests passed"   # ambe
 notify-send -a chromium -u critical "Deploy failed"  "check the logs"      # red
 ```
 
+## Scripting
+
+The widget answers `omarchy-shell minimap <function>`:
+
+```bash
+omarchy-shell minimap alert chromium critical   # light the chromium window red (minor | critical)
+omarchy-shell minimap clear                     # drop every alert
+omarchy-shell minimap jump                      # focus the most urgent alert
+omarchy-shell minimap list                      # the boxes as JSON
+```
+
+`alert` takes an app name, matched against window classes like a notification would be. For
+testing without a pointer there are also `menu <row>`, `action <id> <row> [arg]` (`focus`, `float`,
+`fullscreen`, `pin`, `ungroup`, `moveto`, `close`) and `reorder <from> <to>`. The destructive ones
+only work while *Box actions* / *Drag to reorder* are switched on.
+
 ## Files
 
 | | |
 |---|---|
 | `BarWidget.qml` | the widget: layout, boxes, label tab, alerts, settings popup |
 | `BoxFx.qml` | per-box effects (glow, glitch, rings, sparkles, ripple) |
+| `StateMarks.qml` | fullscreen / pinned / floating marks inside a box |
 | `WorkspaceFx.qml` | workspace-switch effects (tearing, bounce, shimmer, ripple) |
 | `Model.js` | pure logic (geometry, grouping, alerts, settings) - unit tested with node |
 | `bin/notify-watch` | notification stream for any daemon |

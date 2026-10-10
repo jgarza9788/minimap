@@ -67,6 +67,8 @@ function eligibleClients(toplevels, workspaceId, includeFloating) {
       floating: ipc.floating === true,
       grouped: groupedOf(ipc),
       pid: Number(ipc.pid) > 0 ? Number(ipc.pid) : 0,
+      pinned: ipc.pinned === true,
+      fullscreen: Number(ipc.fullscreen) > 0,
       focusHistory: Number.isFinite(Number(ipc.focusHistoryID)) ? Number(ipc.focusHistoryID) : 1e9,
       x: x,
       y: y,
@@ -309,6 +311,7 @@ function collapseGroups(clients, activeAddr) {
 function copyClient(c, tabs) {
   return {
     address: c.address, appClass: c.appClass, title: c.title, floating: c.floating,
+    pinned: c.pinned === true, fullscreen: c.fullscreen === true,
     x: c.x, y: c.y, w: c.w, h: c.h, tabs: tabs
   }
 }
@@ -351,6 +354,9 @@ function buildColumns(clients, monitor, viewport, vertical, activeAddr) {
           title: w.title,
           appClass: w.appClass,
           tabs: w.tabs,
+          floating: w.floating === true,
+          pinned: w.pinned === true,
+          fullscreen: w.fullscreen === true,
           off: (vertical ? w.x : w.y) - crossOrigin,
           span: vertical ? w.w : w.h,
           focused: active !== "" && (w.address === active
@@ -371,6 +377,7 @@ function layoutTape(columns, o) {
   var stackGap = Number(o.stackGap) || 0
   var vertical = o.vertical === true
   var items = []
+  var bounds = []
   var cursor = 0
   for (var i = 0; i < (columns || []).length; i++) {
     var col = columns[i]
@@ -392,12 +399,16 @@ function layoutTape(columns, o) {
         bh: vertical ? len : cross,
         focused: w.focused === true,
         onScreen: col.visibleFraction > 0.02,
+        floating: w.floating === true,
+        pinned: w.pinned === true,
+        fullscreen: w.fullscreen === true,
         tabsJson: tabs ? JSON.stringify(tabs) : ""
       })
     }
+    bounds.push({ start: cursor, len: len })
     cursor += len + gap
   }
-  return { items: items, total: Math.max(0, cursor - (items.length ? gap : 0)) }
+  return { items: items, total: Math.max(0, cursor - (items.length ? gap : 0)), cols: bounds }
 }
 
 // ---- Animation styles -----------------------------------------------------
@@ -538,6 +549,94 @@ function parseNotification(line) {
   }
 }
 
+// ---- Box actions -----------------------------------------------------------
+// Rows of the right-click box menu. `win` = { tabbed, floating, pinned, fullscreen }.
+// Pin only works on floating windows (Hyprland: "does not qualify to be pinned").
+function menuItemsFor(win) {
+  var w = win || {}
+  var items = [
+    { id: "focus", label: "Focus", enabled: true },
+    { id: "float", label: w.floating ? "Make tiled" : "Make floating", enabled: true },
+    { id: "fullscreen", label: w.fullscreen ? "Exit fullscreen" : "Fullscreen", enabled: true },
+    { id: "pin", label: w.pinned ? "Unpin" : "Pin", enabled: w.floating === true || w.pinned === true }
+  ]
+  if (w.tabbed) items.push({ id: "ungroup", label: "Ungroup tabs", enabled: true })
+  items.push({ id: "moveto", label: "Move to workspace", enabled: true, submenu: true })
+  items.push({ id: "close", label: "Close window", enabled: true, danger: true })
+  items.push({ id: "settings", label: "Settings...", enabled: true })
+  return items
+}
+
+// Hyprland dispatch strings for a menu action, in order. [] for anything invalid:
+// the address must be a hex address and a workspace a whole number 1..10.
+function actionCommand(id, addr, usingLua, arg) {
+  var a = normalizeAddress(addr)
+  if (!a) return []
+  var lua = usingLua === true
+  var focus = lua ? 'hl.dsp.focus({ window = "address:' + a + '" })' : "focuswindow address:" + a
+  switch (id) {
+    case "focus": return [focus]
+    case "close":
+      return [lua ? 'hl.dsp.window.close({ window = "address:' + a + '" })' : "closewindow address:" + a]
+    case "float":
+      return [lua ? 'hl.dsp.window.float({ action = "toggle", window = "address:' + a + '" })' : "togglefloating address:" + a]
+    case "fullscreen": return [focus, lua ? "hl.dsp.window.fullscreen()" : "fullscreen 0"]
+    case "pin": return [focus, lua ? "hl.dsp.window.pin()" : "pin"]
+    case "ungroup": return [focus, lua ? "hl.dsp.group.toggle()" : "togglegroup"]
+    case "moveto":
+      var ws = Number(arg)
+      if (!(ws >= 1 && ws <= 10) || Math.round(ws) !== ws) return []
+      return [focus, lua ? 'hl.dsp.window.move({ workspace = "' + ws + '" })' : "movetoworkspace " + ws]
+  }
+  return []
+}
+
+// ---- Jump to alert -----------------------------------------------------------
+// `alerts` = address -> level, `at` = address -> ms timestamp. Critical beats minor,
+// then the most recent wins. "" when there is nothing to jump to.
+function pickAlertTarget(alerts, at) {
+  var best = "", bestLevel = 0, bestAt = -1
+  for (var addr in (alerts || {})) {
+    var level = Number(alerts[addr]) || 0
+    var t = Number((at || {})[addr]) || 0
+    if (level > bestLevel || (level === bestLevel && t > bestAt)) { best = addr; bestLevel = level; bestAt = t }
+  }
+  return best
+}
+
+// Dispatch strings for a swapPlan: ["r","r"] -> two `swapcol r`.
+function swapCommands(plan, usingLua) {
+  var out = []
+  for (var i = 0; i < (plan || []).length; i++) {
+    var d = plan[i] === "l" ? "l" : (plan[i] === "r" ? "r" : "")
+    if (!d) return []
+    out.push(usingLua === true ? 'hl.dsp.layout("swapcol ' + d + '")' : "layoutmsg swapcol " + d)
+  }
+  return out
+}
+
+// ---- Drag to reorder ---------------------------------------------------------
+// Column index whose centre is nearest to `pos` (px along the bar's axis).
+// `cols` is layoutTape().cols = [{ start, len }].
+function slotAt(cols, pos) {
+  var list = cols || []
+  var best = -1, bestDist = Infinity
+  for (var i = 0; i < list.length; i++) {
+    var d = Math.abs(list[i].start + list[i].len / 2 - Number(pos))
+    if (d < bestDist) { best = i; bestDist = d }
+  }
+  return best
+}
+
+// The swapcol steps that move a column from index `from` to `to`: ["r", "r", ...] / ["l", ...].
+function swapPlan(from, to) {
+  var f = Math.round(Number(from)), t = Math.round(Number(to))
+  if (!isFinite(f) || !isFinite(t) || f === t || f < 0 || t < 0) return []
+  var out = []
+  for (var i = 0; i < Math.abs(t - f); i++) out.push(t > f ? "r" : "l")
+  return out
+}
+
 var GROUP_STYLE_ORDER = ["tabbar", "letter"]
 var GROUP_STYLES = {
   tabbar: { label: "Tab bar", description: "A row of tabs along the top of the box" },
@@ -556,7 +655,10 @@ function resolveSettings(raw) {
     showFloating: s.showFloating === true,
     groupStyle: resolveGroupStyle(String(s.groupStyle || "")),
     animStyle: resolveAnimStyle(String(s.animStyle || "")),
-    attention: s.attention !== false
+    attention: s.attention !== false,
+    boxActions: s.boxActions === true,
+    dragReorder: s.dragReorder === true,
+    stateMarkers: s.stateMarkers !== false
   }
 }
 
@@ -574,6 +676,8 @@ if (typeof module !== "undefined") {
     groupColumns: groupColumns, layoutTape: layoutTape,
     ANIM_STYLE_ORDER: ANIM_STYLE_ORDER, ANIM_STYLES: ANIM_STYLES, resolveAnimStyle: resolveAnimStyle,
     motionFor: motionFor, attentionLevel: attentionLevel,
+    menuItemsFor: menuItemsFor, actionCommand: actionCommand, pickAlertTarget: pickAlertTarget,
+    slotAt: slotAt, swapPlan: swapPlan, swapCommands: swapCommands,
     rowKeyFor: rowKeyFor, reconcileAlerts: reconcileAlerts, parseNotification: parseNotification, urgentAddress: urgentAddress, matchNotificationWindow: matchNotificationWindow, buildColumns: buildColumns, resolveSettings: resolveSettings
   }
 }

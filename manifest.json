@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "jgarza.minimap",
   "name": "Minimap",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "jgarza",
   "license": "MIT",
   "description": "Workspace number, a separator, then a row of rectangles showing the active workspace's windows as a proportional scrolling-layout tape. Focused window is accent-filled, scrolled-off windows are dimmed. Click a rectangle to focus it, scroll to change workspace, right-click for number styles (numbers, roman, japanese, dots).",
@@ -26,7 +26,10 @@
       "showFloating": false,
       "groupStyle": "tabbar",
       "animStyle": "smooth",
-      "attention": true
+      "attention": true,
+      "boxActions": false,
+      "dragReorder": false,
+      "stateMarkers": true
     },
     "schema": [
       {
@@ -144,6 +147,27 @@
         "label": "Attention cues",
         "description": "Highlight windows that are urgent or have a notification: minor (amber) and critical (red).",
         "defaultValue": true
+      },
+      {
+        "key": "stateMarkers",
+        "type": "boolean",
+        "label": "State markers",
+        "description": "Marks inside a box for fullscreen, pinned and floating windows.",
+        "defaultValue": true
+      },
+      {
+        "key": "boxActions",
+        "type": "boolean",
+        "label": "Box actions",
+        "description": "Right-click a box for a window menu (focus, float, fullscreen, pin, move to workspace, close); middle-click closes the window.",
+        "defaultValue": false
+      },
+      {
+        "key": "dragReorder",
+        "type": "boolean",
+        "label": "Drag to reorder",
+        "description": "Hold the right mouse button on a box and drag sideways to move its column (the bar keeps left-drag for moving widgets).",
+        "defaultValue": false
       }
     ]
   }

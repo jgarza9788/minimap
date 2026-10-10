@@ -218,6 +218,7 @@ BarWidget {
         rows.append({
           key: it.key, address: it.address, bx: it.bx, by: it.by, bw: it.bw, bh: it.bh,
           focused: it.focused, onScreen: it.onScreen, tabsJson: it.tabsJson,
+          floating: it.floating, pinned: it.pinned, fullscreen: it.fullscreen,
           closing: false, closedAt: 0, fresh: reapReady
         })
       } else {
@@ -344,6 +345,16 @@ BarWidget {
       implicitHeight: numText.implicitHeight
       Behavior on implicitWidth { SpringAnimation { spring: root.springK; damping: root.springD; epsilon: 0.2 } }
 
+      // Click the number to jump to whatever is alerting (critical first, then newest).
+      MouseArea {
+        anchors.fill: parent
+        anchors.margins: -3
+        z: 10
+        acceptedButtons: Qt.LeftButton
+        cursorShape: root.hasAlerts ? Qt.PointingHandCursor : Qt.ArrowCursor
+        onClicked: root.jumpToAlert()
+      }
+
       // Themed cue for alerts on other workspaces / notifications nobody owns.
       BoxFx {
         id: numberFx
@@ -388,6 +399,20 @@ BarWidget {
       Behavior on implicitWidth { SpringAnimation { spring: root.springK; damping: root.springD; epsilon: 0.2 } }
       Behavior on implicitHeight { SpringAnimation { spring: root.springK; damping: root.springD; epsilon: 0.2 } }
 
+      // Where a dragged box will land.
+      Rectangle {
+        visible: root.dragActive && root.dragTarget >= 0 && root.dragTarget !== root.dragFrom && root.dragTarget < root.tape.cols.length
+        z: 60
+        radius: 1
+        color: root.accentColor
+        readonly property var col: visible ? root.tape.cols[root.dragTarget] : null
+        readonly property real edge: col ? (root.dragTarget > root.dragFrom ? col.start + col.len + root.cfg.gap / 2 : col.start - root.cfg.gap / 2) : 0
+        x: root.vertical ? 0 : edge - 1
+        y: root.vertical ? edge - 1 : 0
+        width: root.vertical ? parent.width : 2
+        height: root.vertical ? 2 : parent.height
+      }
+
       Repeater {
         model: rows
 
@@ -402,6 +427,9 @@ BarWidget {
           required property bool focused
           required property bool onScreen
           required property string tabsJson
+          required property bool floating
+          required property bool pinned
+          required property bool fullscreen
           required property bool closing
           required property bool fresh
 
@@ -456,6 +484,25 @@ BarWidget {
             id: focusPop
             NumberAnimation { target: rect; property: "pop"; to: root.motion.popTo; duration: root.motion.popIn; easing.type: Easing.OutSine }
             NumberAnimation { target: rect; property: "pop"; to: 1; duration: root.motion.popOut; easing.type: Easing.OutBack; easing.overshoot: root.motion.popOvershoot }
+          }
+
+          // Drag-to-reorder: the box follows the pointer on a translate (not x/y, which spring).
+          property bool dragging: false
+          property real dragDX: 0
+          property real dragDY: 0
+          Behavior on dragDX { enabled: !rect.dragging; SpringAnimation { spring: root.springK; damping: root.springD; epsilon: 0.2 } }
+          Behavior on dragDY { enabled: !rect.dragging; SpringAnimation { spring: root.springK; damping: root.springD; epsilon: 0.2 } }
+          transform: Translate { x: rect.dragDX; y: rect.dragDY }
+          z: dragging ? 50 : 0
+
+          // fullscreen / pinned / floating marks
+          StateMarks {
+            z: 4
+            visible: root.cfg.stateMarkers && !rect.closing
+            pinned: rect.pinned
+            fullscreen: rect.fullscreen
+            floating: rect.floating
+            ink: rect.ink
           }
 
           // Themed one-shot effects and the attention cue for this box.
@@ -543,10 +590,15 @@ BarWidget {
                 MouseArea {
                   anchors.fill: parent
                   anchors.margins: -1
+                  acceptedButtons: Qt.LeftButton | (root.cfg.boxActions ? (Qt.MiddleButton | Qt.RightButton) : 0)
                   hoverEnabled: true
                   cursorShape: Qt.PointingHandCursor
                   enabled: tabRow.visible && !rect.closing
-                  onClicked: root.focusWindow(nub.tabAddr)
+                  onClicked: function (mouse) {
+                    if (mouse.button === Qt.MiddleButton) root.runAction("close", nub.tabAddr)
+                    else if (mouse.button === Qt.RightButton) root.openBoxMenu(nub, nub.tabAddr, true, rect.floating, rect.pinned, rect.fullscreen)
+                    else root.focusWindow(nub.tabAddr)
+                  }
                   onEntered: root.hoverEntered(nub.tabAddr)
                   onExited: root.hoverLeft(nub.tabAddr)
                 }
@@ -555,13 +607,55 @@ BarWidget {
           }
 
           MouseArea {
+            id: body
             anchors.fill: parent
-            acceptedButtons: Qt.LeftButton
+            // The bar claims left-button presses on every widget (it drags modules around), so a box
+            // only ever sees left *clicks*. Dragging a box therefore uses the right button.
+            acceptedButtons: Qt.LeftButton | (root.cfg.boxActions || root.cfg.dragReorder ? Qt.RightButton : 0) | (root.cfg.boxActions ? Qt.MiddleButton : 0)
             hoverEnabled: true
             enabled: !rect.closing
             cursorShape: Qt.PointingHandCursor
-            onPressed: function (mouse) { fx.play("click", mouse.x, mouse.y) }
-            onClicked: root.focusWindow(rect.address)
+            property point pressAt: Qt.point(0, 0)
+            property bool moved: false
+
+            onPressed: function (mouse) {
+              if (mouse.button !== Qt.RightButton) return
+              // Measured in the tape's coordinates: the box itself moves under the pointer while dragged.
+              pressAt = mapToItem(tapeItem, mouse.x, mouse.y)
+              moved = false
+              fx.play("click", mouse.x, mouse.y)
+            }
+            onPositionChanged: function (mouse) {
+              if (!root.cfg.dragReorder || !(pressedButtons & Qt.RightButton)) return
+              var here = mapToItem(tapeItem, mouse.x, mouse.y)
+              var dx = here.x - pressAt.x, dy = here.y - pressAt.y
+              if (!moved && Math.abs(root.vertical ? dy : dx) < 6) return
+              if (!moved) { root.dragFrom = root.columnOfRow(rect); root.dragActive = true }
+              moved = true
+              rect.dragging = true
+              rect.dragDX = root.vertical ? 0 : dx
+              rect.dragDY = root.vertical ? dy : 0
+              root.dragTarget = Model.slotAt(root.tape.cols, root.vertical ? here.y : here.x)
+            }
+            onReleased: function (mouse) {
+              if (!rect.dragging) return
+              var to = root.dragTarget
+              var from = root.dragFrom
+              rect.dragging = false
+              rect.dragDX = 0
+              rect.dragDY = 0
+              root.dragActive = false
+              root.reorderColumns(from, to, rect.address)
+            }
+            onClicked: function (mouse) {
+              if (moved) { moved = false; return }
+              if (mouse.button === Qt.MiddleButton) root.runAction("close", rect.address)
+              else if (mouse.button === Qt.RightButton) {
+                if (root.cfg.boxActions) root.openBoxMenu(rect, rect.address, rect.tabbed, rect.floating, rect.pinned, rect.fullscreen)
+                else root.toggle()                       // only dragging is on: right-click still opens settings
+              }
+              else root.focusWindow(rect.address)
+            }
             onEntered: { root.hoverEntered(rect.address); if (root.cfg.animStyle === "ripple") fx.play("click", mouseX, mouseY) }
             onExited: root.hoverLeft(rect.address)
           }
@@ -588,6 +682,13 @@ BarWidget {
   MouseArea {
     anchors.fill: parent
     acceptedButtons: Qt.RightButton
+    // With box actions or dragging on, right-presses on a box belong to the box (menu / drag);
+    // settings move to the number and separator.
+    onPressed: function (mouse) {
+      if (!root.cfg.boxActions && !root.cfg.dragReorder) return
+      var p = mapToItem(tapeItem, mouse.x, mouse.y)
+      if (p.x >= 0 && p.y >= 0 && p.x <= tapeItem.width && p.y <= tapeItem.height) mouse.accepted = false
+    }
     onClicked: root.toggle()
     onWheel: function (wheel) {
       if (wheel.angleDelta.y === 0) return
@@ -614,12 +715,35 @@ BarWidget {
     return false
   }
 
+  property var alertAt: ({})
+  readonly property bool hasAlerts: Object.keys(alerts).length > 0
+
   function addAlert(addr, level) {
     if (!cfg.attention || !addr) return
     var next = Object.assign({}, alerts)
     next[addr] = Math.max(level, next[addr] || 0)
     alerts = next
+    var times = Object.assign({}, alertAt)
+    times[addr] = Date.now()
+    alertAt = times
     reconcile()
+  }
+
+  // Find the window an alert belongs to (names + sender processes) and light it; an alert nobody
+  // owns pulses the number instead.
+  function raiseAlert(names, pids, level) {
+    if (!cfg.attention) return
+    var tops = Hyprland.toplevels ? Hyprland.toplevels.values : []
+    var addr = Model.matchNotificationWindow(names,
+      Model.eligibleClients(tops, workspaceId, true).concat(Model.eligibleClients(tops, NaN, true)), pids)
+    if (addr === "") { flashNumber(level); return }
+    if (addr === activeAddr) return
+    addAlert(addr, level)
+  }
+
+  function jumpToAlert() {
+    var target = Model.pickAlertTarget(alerts, alertAt)
+    if (target !== "") focusWindow(target)
   }
 
   function reconcile() {
@@ -683,14 +807,107 @@ BarWidget {
         // The same toast shows up in the popup dir, then again in history.
         if (root.seenBefore(n.id)) return
         root.notifBackoff = 2000
-        var level = n.level
-        var tops = Hyprland.toplevels ? Hyprland.toplevels.values : []
-        var addr = Model.matchNotificationWindow(n.names,
-          Model.eligibleClients(tops, root.workspaceId, true).concat(Model.eligibleClients(tops, NaN, true)), n.pids)
-        if (addr === "" || addr === root.activeAddr) { if (addr === "") root.flashNumber(level); return }
-        root.addAlert(addr, level)
+        root.raiseAlert(n.names, n.pids, n.level)
       }
     }
+  }
+
+  // ---- Box actions menu -------------------------------------------------------
+  property bool menuOpen: false
+  property Item menuAnchor: null
+  property string menuMode: "main"          // "main" | "workspaces"
+  property var menuWin: ({ address: "", tabbed: false, floating: false, pinned: false, fullscreen: false })
+  readonly property var menuItems: Model.menuItemsFor(menuWin)
+
+  function openBoxMenu(anchorItem, address, tabbed, floating, pinned, fullscreen) {
+    if (!cfg.boxActions || !anchorItem) return
+    settingsOpen = false
+    menuAnchor = anchorItem
+    menuWin = { address: address, tabbed: tabbed === true, floating: floating === true, pinned: pinned === true, fullscreen: fullscreen === true }
+    menuMode = "main"
+    menuOpen = true
+  }
+
+  // One entry point for every action (menu, middle-click, IPC). Everything but focusing and
+  // opening the settings needs the Box actions toggle, so a stray call cannot close windows.
+  function runAction(id, addr, arg) {
+    if (id === "settings") { menuOpen = false; settingsOpen = true; return }
+    if (id !== "focus" && !cfg.boxActions) return
+    var cmds = Model.actionCommand(id, addr, Hyprland.usingLua === true, arg)
+    for (var i = 0; i < cmds.length; i++) Hyprland.dispatch(cmds[i])
+    menuOpen = false
+    bump()
+  }
+
+  // ---- Drag to reorder ----------------------------------------------------------
+  property bool dragActive: false
+  property int dragFrom: -1
+  property int dragTarget: -1
+
+  function columnOfRow(rect) {
+    var start = vertical ? rect.by : rect.bx
+    var cols = tape.cols
+    for (var i = 0; i < cols.length; i++)
+      if (Math.abs(cols[i].start - start) < 1) return i
+    return Model.slotAt(cols, start + (vertical ? rect.bh : rect.bw) / 2)
+  }
+
+  function addressAtColumn(index) {
+    var c = tape.cols[index]
+    if (!c) return ""
+    for (var i = 0; i < tape.items.length; i++) {
+      var main = vertical ? tape.items[i].by : tape.items[i].bx
+      if (Math.abs(main - c.start) < 1) return tape.items[i].address
+    }
+    return ""
+  }
+
+  function reorderColumns(from, to, addr) {
+    if (!cfg.dragReorder) return
+    var plan = Model.swapPlan(from, to)
+    if (plan.length === 0) return
+    var a = addr && addr !== "" ? addr : addressAtColumn(from)
+    if (a === "") return
+    focusWindow(a)
+    var cmds = Model.swapCommands(plan, Hyprland.usingLua === true)
+    for (var i = 0; i < cmds.length; i++) Hyprland.dispatch(cmds[i])
+    bump()
+  }
+
+  // ---- Scripting: omarchy-shell minimap <function> ------------------------------
+  // alert/clear/jump are the public API; menu/action/reorder drive the same code paths
+  // without a pointer (handy for tests and screenshots).
+  IpcHandler {
+    target: "minimap"
+
+    function alert(app: string, level: string): void {
+      var name = String(app || "").slice(0, 256)
+      if (name === "") return
+      root.raiseAlert([name], [], level === "critical" ? 2 : 1)
+    }
+    function clear(): void { root.alerts = ({}); root.alertAt = ({}); root.reconcile() }
+    function jump(): void { root.jumpToAlert() }
+    // The boxes as JSON (row index, window address, layout position, state flags).
+    function list(): string {
+      var out = []
+      for (var i = 0; i < rows.count; i++) {
+        var r = rows.get(i)
+        out.push({ index: i, address: r.address, bx: r.bx, by: r.by, bw: r.bw, bh: r.bh, floating: r.floating,
+                   pinned: r.pinned, fullscreen: r.fullscreen, focused: r.focused, closing: r.closing })
+      }
+      return JSON.stringify(out)
+    }
+    function menu(index: int): void {
+      if (index < 0 || index >= rows.count) return
+      var row = rows.get(index)
+      var entry = root.items[row.address]
+      root.openBoxMenu(entry ? entry.item : root, row.address, row.tabsJson !== "", row.floating, row.pinned, row.fullscreen)
+    }
+    function action(id: string, index: int, arg: int): void {
+      if (index < 0 || index >= rows.count) return
+      root.runAction(String(id), rows.get(index).address, arg)
+    }
+    function reorder(from: int, to: int): void { root.reorderColumns(from, to, "") }
   }
 
   // ---- Hover / focus label -------------------------------------------------
@@ -967,6 +1184,71 @@ BarWidget {
     }
   }
 
+  // ---- Box menu popup ---------------------------------------------------------------
+  QtObject {
+    id: menuOwner
+    function close() { root.menuOpen = false }
+  }
+
+  PopupCard {
+    id: menuPopup
+    anchorItem: root.menuAnchor ? root.menuAnchor : root
+    bar: root.bar
+    owner: menuOwner
+    open: root.menuOpen
+    contentWidth: fittedContentWidth(Style.space(190))
+    contentHeight: fittedContentHeight(menuColumn.implicitHeight)
+
+    Column {
+      id: menuColumn
+      anchors.fill: parent
+      spacing: Style.space(2)
+
+      Repeater {
+        model: root.menuMode === "main" ? root.menuItems : []
+
+        MenuRow {
+          required property var modelData
+          width: menuColumn.width
+          label: modelData.label
+          enabledRow: modelData.enabled
+          danger: modelData.danger === true
+          submenu: modelData.submenu === true
+          onPicked: {
+            if (modelData.id === "moveto") root.menuMode = "workspaces"
+            else root.runAction(modelData.id, root.menuWin.address)
+          }
+        }
+      }
+
+      MenuRow {
+        visible: root.menuMode === "workspaces"
+        width: menuColumn.width
+        label: "Back"
+        back: true
+        onPicked: root.menuMode = "main"
+      }
+
+      Flow {
+        visible: root.menuMode === "workspaces"
+        width: menuColumn.width
+        spacing: Style.space(3)
+
+        Repeater {
+          model: root.menuMode === "workspaces" ? 10 : 0
+
+          MenuRow {
+            required property int index
+            width: Math.floor((menuColumn.width - Style.space(3) * 4) / 5)
+            label: String(index + 1)
+            centered: true
+            onPicked: root.runAction("moveto", root.menuWin.address, index + 1)
+          }
+        }
+      }
+    }
+  }
+
   // ---- Settings popup ------------------------------------------------------
   PopupCard {
     id: settingsPopup
@@ -1160,6 +1442,33 @@ BarWidget {
         onPicked: root.saveSetting("attention", !root.cfg.attention)
       }
 
+      OptionRow {
+        width: parent.width
+        square: true
+        label: "State markers"
+        description: "Marks for fullscreen, pinned and floating windows"
+        checked: root.cfg.stateMarkers
+        onPicked: root.saveSetting("stateMarkers", !root.cfg.stateMarkers)
+      }
+
+      OptionRow {
+        width: parent.width
+        square: true
+        label: "Box actions"
+        description: "Right-click a box for a window menu, middle-click closes it"
+        checked: root.cfg.boxActions
+        onPicked: root.saveSetting("boxActions", !root.cfg.boxActions)
+      }
+
+      OptionRow {
+        width: parent.width
+        square: true
+        label: "Drag to reorder"
+        description: "Hold the right mouse button on a box and drag sideways"
+        checked: root.cfg.dragReorder
+        onPicked: root.saveSetting("dragReorder", !root.cfg.dragReorder)
+      }
+
       Rectangle {
         width: parent.width
         height: 1
@@ -1213,6 +1522,46 @@ BarWidget {
           onClicked: root.saveSetting("showFloating", !root.cfg.showFloating)
         }
       }
+    }
+  }
+
+  // One row of the box menu.
+  component MenuRow: Rectangle {
+    id: mrow
+    property string label: ""
+    property bool enabledRow: true
+    property bool danger: false
+    property bool submenu: false
+    property bool back: false
+    property bool centered: false
+    signal picked()
+
+    implicitHeight: Style.space(24)
+    radius: Style.space(5)
+    color: area.containsMouse && enabledRow ? Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.14) : "transparent"
+    opacity: enabledRow ? 1 : 0.4
+    Behavior on color { ColorAnimation { duration: 120 } }
+
+    Text {
+      textFormat: Text.PlainText
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.leftMargin: Style.space(8)
+      anchors.rightMargin: Style.space(8)
+      horizontalAlignment: mrow.centered ? Text.AlignHCenter : Text.AlignLeft
+      text: (mrow.back ? "\u2039 " : "") + mrow.label + (mrow.submenu ? "  \u203a" : "")
+      color: mrow.danger ? root.urgentColor : root.fg
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.body
+    }
+    MouseArea {
+      id: area
+      anchors.fill: parent
+      hoverEnabled: true
+      enabled: mrow.enabledRow
+      cursorShape: Qt.PointingHandCursor
+      onClicked: mrow.picked()
     }
   }
 

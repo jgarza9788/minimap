@@ -361,13 +361,20 @@ class LiveDbusTests(unittest.TestCase):
 
     def test_critical_notification_reaches_us_with_pid(self):
         tag = "nwtest-crit-%d" % os.getpid()
-        self.send("-a", tag, "-u", "critical", "Deploy failed", "see logs")
-        rec = self.stream.next(match=lambda r: r["app"] == tag)
-        self.assertIsNotNone(rec, "no notification arrived over D-Bus")
-        self.assertEqual((rec["urgency"], rec["source"]), (2, "dbus"))
-        self.assertNotIn("summary", rec)
-        self.assertNotIn("body", rec)
-        self.assertGreater(rec["pid"], 0)
+        rec = None
+        # notify-send exits within milliseconds; once in a while it is gone before the watcher can
+        # vouch for it (pid stays 0 - by design). Everything else must hold on every attempt, and
+        # a pid must show up within a few attempts.
+        for attempt in range(6):
+            self.send("-a", tag, "-u", "critical", "Deploy failed", "see logs")
+            rec = self.stream.next(match=lambda r: r["app"] == tag)
+            self.assertIsNotNone(rec, "no notification arrived over D-Bus")
+            self.assertEqual((rec["urgency"], rec["source"]), (2, "dbus"))
+            self.assertNotIn("summary", rec)
+            self.assertNotIn("body", rec)
+            if rec["pid"] > 0:
+                break
+        self.assertGreater(rec["pid"], 0, "no attempt got a verified pid")
         self.assertIn(os.getpid(), rec["ancestors"], "the sender's parent chain should include this test process")
 
     def test_minor_levels(self):
