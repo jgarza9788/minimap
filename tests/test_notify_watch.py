@@ -295,7 +295,8 @@ def tearDownModule():
     for entry in os.listdir("/proc"):
         if entry.isdigit():
             try:
-                cmd = open("/proc/%s/cmdline" % entry, "rb").read().replace(b"\0", b" ").decode("utf-8", "replace")
+                with open("/proc/%s/cmdline" % entry, "rb") as f:
+                    cmd = f.read().replace(b"\0", b" ").decode("utf-8", "replace")
             except OSError:
                 continue
             argv0 = cmd.split(" ", 1)[0].rsplit("/", 1)[-1]

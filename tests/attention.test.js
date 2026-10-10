@@ -121,6 +121,14 @@ ok("pid: none and no name -> none", M.matchNotificationWindow([], pwins, [31337]
 ok("pid: empty list = name matching only", M.matchNotificationWindow(["slack"], pwins, []) === "0xf3");
 ok("pid: windows with no pid are ignored", M.matchNotificationWindow([], [{ address: "0xaa", appClass: "x", focusHistory: 0 }], [0]) === "");
 
+// ---- the focused window is not the sender --------------------------------------------
+const ghosts = [{ address: "0xa1", appClass: "ghostty", focusHistory: 0 }, { address: "0xa2", appClass: "ghostty", focusHistory: 3 },
+  { address: "0xa3", appClass: "ghostty", focusHistory: 1 }];
+ok("name: another window of the app beats the focused one", M.matchNotificationWindow(["ghostty"], ghosts, []) === "0xa3");
+ok("name: loose match also skips the focused window", M.matchNotificationWindow(["com.mitchellh.ghostty"], ghosts, []) === "0xa3");
+ok("name: only the focused window -> still returned", M.matchNotificationWindow(["ghostty"], [ghosts[0]], []) === "0xa1");
+ok("pid: same-pid windows skip the focused one", M.matchNotificationWindow([], [{ address: "0xb1", pid: 9, focusHistory: 0 }, { address: "0xb2", pid: 9, focusHistory: 2 }], [9]) === "0xb2");
+
 // ---- the record notify-watch emits ---------------------------------------------------
 const rec = M.parseNotification(JSON.stringify({ id: 7, timestamp: 1791590587357, app: "notify-send", appIcon: "", urgency: 2,
   extraNames: ["org.gnome.Nautilus", "folder"], pid: 4242, ancestors: [4000, 500, 1], source: "dbus" }));

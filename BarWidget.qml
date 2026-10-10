@@ -887,6 +887,11 @@ BarWidget {
     }
     function clear(): void { root.alerts = ({}); root.alertAt = ({}); root.reconcile() }
     function jump(): void { root.jumpToAlert() }
+    // The alert state as JSON: address -> level, per-box cues, the number's level, jump target.
+    function alerts(): string {
+      return JSON.stringify({ alerts: root.alerts, attention: root.attention, otherLevel: root.otherLevel,
+                              numberFlash: root.numberFlash, target: Model.pickAlertTarget(root.alerts, root.alertAt) })
+    }
     // The boxes as JSON (row index, window address, layout position, state flags).
     function list(): string {
       var out = []

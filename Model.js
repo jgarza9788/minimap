@@ -452,7 +452,12 @@ function nameTokens(value) {
 // Which window does a notification belong to? `names` are the notification's
 // app name / icon name; they are compared with each window's class: exact
 // token match first, then a contains match for names of 4+ characters.
-function focusRank(c) { return c.focusHistory === undefined ? 1e9 : c.focusHistory }
+// Lower = more likely the sender. The focused window (history 0) can't be the one asking for
+// attention, so any other window of the same app ranks ahead of it.
+function focusRank(c) {
+  if (c.focusHistory === undefined) return 1e9
+  return c.focusHistory === 0 ? 1e8 : c.focusHistory
+}
 function mostRecent(list) {
   var best = list[0]
   for (var i = 1; i < list.length; i++) if (focusRank(list[i]) < focusRank(best)) best = list[i]
@@ -475,9 +480,7 @@ function matchNotificationWindow(names, clients, pids) {
   // An app name can't say WHICH of several windows of that app sent it. The
   // best guess is the one used most recently (lowest focusHistory), which is
   // normally the terminal / chat the user just left.
-  function better(c, cur) {
-    return !cur || (c.focusHistory === undefined ? 1e9 : c.focusHistory) < (cur.focusHistory === undefined ? 1e9 : cur.focusHistory)
-  }
+  function better(c, cur) { return !cur || focusRank(c) < focusRank(cur) }
   for (var j = 0; j < (clients || []).length; j++) {
     var tokens = nameTokens(clients[j].appClass)
     var isExact = false, isLoose = false
