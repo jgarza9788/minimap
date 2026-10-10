@@ -1,0 +1,334 @@
+#!/usr/bin/env python3
+"""Stream desktop notifications as JSON lines for the jgarza.minimap widget.
+
+Works with any notification daemon (Omarchy's shell, mako, dunst, swaync,
+KDE...) by watching the org.freedesktop.Notifications Notify calls on the
+session bus, which every daemon receives. If the bus cannot be monitored it
+falls back to the Omarchy shell's own notification files, watched with
+inotifywait.
+
+One JSON object per line:
+
+  id          unique per notification (dbus cookie / file name)
+  timestamp   ms since epoch
+  app         app_name sent by the client (may be "")
+  appIcon     app_icon sent by the client (may be "")
+  urgency     0 low, 1 normal, 2 critical
+  extraNames  more names that identify the sender: the desktop-entry and
+              image-path hints
+  pid         sender pid as the BUS reports it; if the sender already exited, the
+              client's sender-pid hint, but only when it is a live process of
+              ours (so pid 1 / other users' pids are rejected); 0 if unknown
+  ancestors   pid's parent chain, nearest first, so a window can be found
+              from a process running inside it
+  source      "dbus" | "files"
+
+Summary and body are deliberately NOT forwarded: the widget never shows them.
+Output is rate limited, strings are clipped, and child processes die with this
+one (signals, parent death).
+
+Usage: notify-watch [--source auto|dbus|files] [--dir NOTIFICATION_STATE_DIR]
+"""
+import argparse
+import atexit
+import ctypes
+import json
+import os
+import re
+import shutil
+import signal
+import stat
+import subprocess
+import sys
+import threading
+import time
+
+MATCH = "type='method_call',interface='org.freedesktop.Notifications',member='Notify'"
+DEFAULT_DIR = os.path.join(os.path.expanduser("~"), ".local/state/omarchy/notifications")
+
+MAX_FIELD = 256            # chars kept of any string field
+MAX_FILE = 64 * 1024       # bytes read from a notification file
+RATE = 20.0                # notifications per second ...
+BURST = 40                 # ... with this much headroom; the rest are dropped
+SENDER_RE = re.compile(r"^:[0-9]+\.[0-9]+$")   # a bus unique name
+PID_CACHE_MAX = 256
+
+
+def clip(value, limit=MAX_FIELD):
+    return str(value if value is not None else "")[:limit]
+
+
+class Limiter:
+    """Token bucket: allow() is True while tokens remain."""
+    def __init__(self, rate=RATE, burst=BURST, clock=time.monotonic):
+        self.rate, self.burst, self.clock = rate, burst, clock
+        self.tokens, self.stamp = float(burst), clock()
+
+    def refill(self):
+        now = self.clock()
+        self.tokens = min(self.burst, self.tokens + (now - self.stamp) * self.rate)
+        self.stamp = now
+
+    def allow(self):
+        self.refill()
+        if self.tokens >= 1:
+            self.tokens -= 1
+            return True
+        return False
+
+
+# ---- pure helpers (unit-tested) ---------------------------------------------
+
+def hint(hints, *names):
+    """Value of the first present hint, unwrapping busctl's {"type","data"}."""
+    for name in names:
+        if name in hints:
+            value = hints[name]
+            return value.get("data") if isinstance(value, dict) else value
+    return None
+
+
+def parent_pid(pid, read_stat=None):
+    """PPID of `pid` from /proc/<pid>/stat, or 0. The comm field may hold
+    spaces and parentheses, so split after the LAST ')'."""
+    try:
+        text = read_stat(pid) if read_stat else open("/proc/%d/stat" % pid).read()
+        return int(text.rsplit(")", 1)[1].split()[1])
+    except (OSError, ValueError, IndexError):
+        return 0
+
+
+def ancestors(pid, read_stat=None, limit=12):
+    chain = []
+    cur = parent_pid(pid, read_stat) if pid > 0 else 0
+    while cur > 1 and len(chain) < limit and cur not in chain:
+        chain.append(cur)
+        cur = parent_pid(cur, read_stat)
+    return chain
+
+
+_pid_cache = {}
+
+
+def lookup_pid(sender, runner=None):
+    """The bus's own answer for a unique name's pid ("u 1234"); 0 if unknown.
+    Unlike the sender-pid hint, a client cannot lie about it. Cached per sender."""
+    if not sender or not SENDER_RE.fullmatch(str(sender)):
+        return 0
+    if sender in _pid_cache:
+        return _pid_cache[sender]
+    cmd = ["busctl", "--user", "call", "org.freedesktop.DBus", "/org/freedesktop/DBus",
+           "org.freedesktop.DBus", "GetConnectionUnixProcessID", "s", sender]
+    try:
+        out = runner(cmd) if runner else subprocess.run(
+            cmd, capture_output=True, text=True, timeout=1.5).stdout
+        pid = int(out.split()[1])
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        return 0
+    if len(_pid_cache) >= PID_CACHE_MAX:
+        _pid_cache.clear()
+    _pid_cache[sender] = pid
+    return pid
+
+
+def plausible_pid(pid):
+    """A hint-supplied pid is only believable if it is a live process of ours.
+    That rejects pid 1, other users' processes and dead pids. (A same-user
+    process could still name another of its own; short-lived senders such as
+    notify-send are gone before the bus can vouch for them.)"""
+    try:
+        return pid > 1 and os.stat("/proc/%d" % pid).st_uid == os.getuid()
+    except OSError:
+        return False
+
+
+def record_from_dbus(message, pid_lookup=lookup_pid, read_stat=None, pid_ok=plausible_pid):
+    """busctl --json=short Notify method_call -> record, or None."""
+    if not isinstance(message, dict) or message.get("member") != "Notify":
+        return None
+    payload = message.get("payload") or {}
+    data = payload.get("data")
+    if not isinstance(data, list) or len(data) < 7 or not isinstance(data[6], dict):
+        return None
+    hints = data[6]
+    try:
+        urgency = int(hint(hints, "urgency") if hint(hints, "urgency") is not None else 1)
+    except (TypeError, ValueError):
+        urgency = 1
+    # Trust the bus over the client: the hint is only used if the lookup fails.
+    pid = pid_lookup(message.get("sender"))
+    if not pid:
+        try:
+            pid = int(hint(hints, "sender-pid"))
+        except (TypeError, ValueError):
+            pid = 0
+        if not pid_ok(pid):
+            pid = 0
+    extra = [clip(v) for v in (hint(hints, "desktop-entry"),
+                               hint(hints, "image-path", "image_path")) if v]
+    return {
+        "id": int(message.get("cookie") or 0),
+        "timestamp": int((message.get("timestamp-realtime") or time.time() * 1e6) // 1000),
+        "app": clip(data[0]),
+        "appIcon": clip(data[2]),
+        "urgency": max(0, min(2, urgency)),
+        "extraNames": extra,
+        "pid": pid,
+        "ancestors": ancestors(pid, read_stat),
+        "source": "dbus",
+    }
+
+
+def record_from_file(path, text):
+    """One Omarchy notification JSON file -> record, or None."""
+    try:
+        n = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(n, dict):
+        return None
+    return {
+        "id": n["id"] if isinstance(n.get("id"), (int, str)) else os.path.basename(path),
+        "timestamp": n["timestamp"] if isinstance(n.get("timestamp"), int) else int(time.time() * 1000),
+        "app": clip(n.get("app")),
+        "appIcon": clip(n.get("appIcon")),
+        "urgency": max(0, min(2, n["urgency"])) if isinstance(n.get("urgency"), int) else 1,
+        "extraNames": [],
+        "pid": 0,
+        "ancestors": [],
+        "source": "files",
+    }
+
+
+def read_file_safe(path):
+    """Contents of a small regular file, or None. Symlinks, FIFOs, devices and
+    big files are refused."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        return os.read(fd, MAX_FILE).decode("utf-8", "replace")
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+
+
+# ---- process hygiene ----------------------------------------------------------
+
+_children = []
+
+
+def _die_with_parent():
+    """Child pre-exec: ask the kernel to SIGTERM us when our parent dies."""
+    try:
+        ctypes.CDLL("libc.so.6", use_errno=True).prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
+    except (OSError, AttributeError):
+        pass
+
+
+def spawn(cmd):
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+                            preexec_fn=_die_with_parent)
+    _children.append(proc)
+    return proc
+
+
+def cleanup():
+    for proc in _children:
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+        except OSError:
+            pass
+    for proc in _children:
+        try:
+            proc.wait(timeout=1)
+        except (OSError, subprocess.SubprocessError):
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
+
+def install_hygiene():
+    """Die cleanly on signals, and when whoever started us goes away."""
+    atexit.register(cleanup)
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, lambda *_: sys.exit(0))
+    parent = os.getppid()
+
+    def watch():
+        while True:
+            time.sleep(1)
+            if os.getppid() != parent:
+                cleanup()
+                os._exit(0)
+    threading.Thread(target=watch, daemon=True).start()
+
+
+# ---- sources ----------------------------------------------------------------
+
+_limiter = Limiter()
+
+
+def emit(record):
+    sys.stdout.write(json.dumps(record, separators=(",", ":")) + "\n")
+    sys.stdout.flush()
+
+
+def run_dbus():
+    """Returns the busctl exit status once the stream ends."""
+    proc = spawn(["busctl", "--user", "monitor", "--json=short", "--match", MATCH])
+    for line in proc.stdout:
+        # Flood control comes first, so a spammer costs us no bus lookups.
+        if not _limiter.allow():
+            continue
+        try:
+            record = record_from_dbus(json.loads(line))
+        except ValueError:
+            continue
+        if record:
+            emit(record)
+    return proc.wait()
+
+
+def run_files(directory):
+    os.makedirs(os.path.join(directory, "history"), exist_ok=True)
+    proc = spawn(["inotifywait", "-m", "-q", "-e", "close_write,moved_to", "--format", "%w%f",
+                  directory, os.path.join(directory, "history")])
+    for line in proc.stdout:
+        path = line.rstrip("\n")
+        if not path.endswith(".json") or not _limiter.allow():
+            continue
+        text = read_file_safe(path)
+        record = record_from_file(path, text) if text is not None else None
+        if record:
+            emit(record)
+    return proc.wait()
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument("--source", choices=["auto", "dbus", "files"], default="auto")
+    parser.add_argument("--dir", default=DEFAULT_DIR)
+    args = parser.parse_args(argv)
+    install_hygiene()
+
+    if args.source in ("auto", "dbus") and shutil.which("busctl"):
+        started = time.time()
+        run_dbus()
+        # A bus that cannot be monitored ends at once; a real stream does not.
+        if args.source == "dbus" or time.time() - started > 3:
+            return 0
+    if not shutil.which("inotifywait"):
+        sys.stderr.write("notify-watch: neither busctl nor inotifywait is available\n")
+        return 1
+    return run_files(args.dir)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

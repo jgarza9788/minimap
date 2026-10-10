@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "id": "jgarza.minimap",
+  "name": "Minimap",
+  "version": "1.0.0",
+  "author": "jgarza",
+  "license": "MIT",
+  "description": "Workspace number, a separator, then a row of rectangles showing the active workspace's windows as a proportional scrolling-layout tape. Focused window is accent-filled, scrolled-off windows are dimmed. Click a rectangle to focus it, scroll to change workspace, right-click for number styles (numbers, roman, japanese, dots).",
+  "preview": "preview.png",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Minimap",
+    "description": "Workspace number plus a mini tape of its windows.",
+    "category": "Compositor",
+    "allowMultiple": false,
+    "defaultSection": "center",
+    "defaults": {
+      "numberStyle": "numbers",
+      "maxWidth": 1000,
+      "gap": 3,
+      "showFloating": false,
+      "groupStyle": "tabbar",
+      "animStyle": "smooth",
+      "attention": true
+    },
+    "schema": [
+      {
+        "key": "numberStyle",
+        "type": "enum",
+        "label": "Workspace label",
+        "description": "How the workspace number is written.",
+        "defaultValue": "numbers",
+        "options": [
+          {
+            "value": "numbers",
+            "label": "Numbers",
+            "description": "1 2 3 4 5"
+          },
+          {
+            "value": "roman",
+            "label": "Roman",
+            "description": "I II III IV V"
+          },
+          {
+            "value": "japanese",
+            "label": "Japanese",
+            "description": "一 二 三 四 五"
+          },
+          {
+            "value": "dots",
+            "label": "Dots",
+            "description": ". : .: :: .::"
+          }
+        ]
+      },
+      {
+        "key": "maxWidth",
+        "type": "integer",
+        "label": "Maximum tape width",
+        "description": "Longest the rectangle row may get, in logical pixels.",
+        "min": 60,
+        "max": 600,
+        "step": 10,
+        "defaultValue": 200
+      },
+      {
+        "key": "gap",
+        "type": "integer",
+        "label": "Gap between windows",
+        "description": "Space between rectangles.",
+        "min": 0,
+        "max": 12,
+        "step": 1,
+        "defaultValue": 3
+      },
+      {
+        "key": "showFloating",
+        "type": "boolean",
+        "label": "Show floating windows",
+        "description": "Include floating windows in the tape.",
+        "defaultValue": false
+      },
+      {
+        "key": "groupStyle",
+        "type": "enum",
+        "label": "Tabbed windows",
+        "description": "How a Hyprland group (tabbed windows) is drawn.",
+        "defaultValue": "tabbar",
+        "options": [
+          {
+            "value": "tabbar",
+            "label": "Tab bar",
+            "description": "A row of tabs along the top of the box."
+          },
+          {
+            "value": "letter",
+            "label": "Letter \"t\"",
+            "description": "A t in the middle of the box."
+          }
+        ]
+      },
+      {
+        "key": "animStyle",
+        "type": "enum",
+        "label": "Animation style",
+        "description": "Motion and effects for focus changes, windows opening and closing, and alerts.",
+        "defaultValue": "smooth",
+        "options": [
+          {
+            "value": "smooth",
+            "label": "Smooth",
+            "description": "Calm springs and soft fades (default)"
+          },
+          {
+            "value": "cyberpunk",
+            "label": "Cyberpunk",
+            "description": "Glitches, RGB split and hard flickers"
+          },
+          {
+            "value": "fun",
+            "label": "Fun",
+            "description": "Big bouncy pops, wobble and shockwaves"
+          },
+          {
+            "value": "magic",
+            "label": "Magic",
+            "description": "Sparkles and shimmering light"
+          },
+          {
+            "value": "ripple",
+            "label": "Ripple",
+            "description": "Android-style ink ripples"
+          }
+        ]
+      },
+      {
+        "key": "attention",
+        "type": "boolean",
+        "label": "Attention cues",
+        "description": "Highlight windows that are urgent or have a notification: minor (amber) and critical (red).",
+        "defaultValue": true
+      }
+    ]
+  }
+}
