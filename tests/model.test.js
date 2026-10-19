@@ -128,4 +128,15 @@ ok("swapCommands: lua + legacy", M.swapCommands(["r", "l"], true).join("|") === 
   && M.swapCommands(["r"], false)[0] === "layoutmsg swapcol r");
 ok("swapCommands: junk refused", M.swapCommands(["r", "x"], true).length === 0 && M.swapCommands(undefined, true).length === 0 && M.swapCommands(['r" ) exit(', "l"], true).length === 0);
 
+// Stale toplevels (not in hyprctl's live set) are dropped.
+;(function () {
+  var M = require("../Model.js")
+  var mk = function (a) { return { address: a, lastIpcObject: { mapped: true, workspace: { id: 1 }, at: [0, 0], size: [10, 10] } } }
+  var tops = [mk("61ba1"), mk("61ba2")]
+  var assert = require("assert")
+  assert.strictEqual(M.eligibleClients(tops, 1, false).length, 2)
+  assert.deepStrictEqual(M.eligibleClients(tops, 1, false, { "0x61ba1": true }).map(function (c) { return c.address }), ["0x61ba1"])
+  console.log("ok live filter")
+})()
+
 process.exit(failed ? 1 : 0);

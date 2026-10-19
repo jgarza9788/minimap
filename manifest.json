@@ -65,11 +65,11 @@
         "key": "maxWidth",
         "type": "integer",
         "label": "Maximum tape width",
-        "description": "Longest the rectangle row may get, in logical pixels.",
+        "description": "Longest the row may get, in logical pixels. Beyond it the row scrolls with the focused window and a glowing edge shows where more windows are hidden.",
         "min": 60,
-        "max": 600,
+        "max": 2000,
         "step": 10,
-        "defaultValue": 200
+        "defaultValue": 1000
       },
       {
         "key": "gap",

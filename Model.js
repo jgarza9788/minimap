@@ -36,7 +36,9 @@ function groupedOf(ipc) {
   return out
 }
 
-function eligibleClients(toplevels, workspaceId, includeFloating) {
+// `live` (optional) is { normalizedAddress: true } from `hyprctl clients`; toplevels
+// it doesn't list are stale leftovers of closed windows and are skipped.
+function eligibleClients(toplevels, workspaceId, includeFloating, live) {
   var list = toplevels || []
   var target = Number(workspaceId)
   var withFloating = includeFloating === true
@@ -47,6 +49,7 @@ function eligibleClients(toplevels, workspaceId, includeFloating) {
     if (!top) continue
     var ipc = ipcOf(top)
 
+    if (live && !live[normalizeAddress(top.address || ipc.address)]) continue
     if (ipc.mapped === false) continue
     if (ipc.floating === true && !withFloating) continue
     if (ipc.hidden === true) continue

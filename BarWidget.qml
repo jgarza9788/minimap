@@ -100,7 +100,7 @@ BarWidget {
     var _dep = tick
     if (workspaceId < 0 || !monitorSize) return []
     var tops = Hyprland.toplevels ? Hyprland.toplevels.values : []
-    var clients = Model.eligibleClients(tops, workspaceId, cfg.showFloating)
+    var clients = Model.eligibleClients(tops, workspaceId, cfg.showFloating, liveAddrs)
     return Model.buildColumns(clients, monitorSize, viewportRange, vertical, activeAddr)
   }
 
@@ -115,7 +115,26 @@ BarWidget {
     columns = rawColumns
   }
 
+  // Addresses `hyprctl clients` reports right now. Quickshell can keep a toplevel for a window
+  // that is gone, which would draw a phantom box; null until the first good read.
+  property var liveAddrs: null
+  Process {
+    id: liveClients
+    command: ["hyprctl", "clients", "-j"]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var list = null
+        try { list = JSON.parse(text) } catch (e) { return }
+        if (!Array.isArray(list)) return
+        var live = {}
+        for (var i = 0; i < list.length; i++) live[Model.normalizeAddress(list[i].address)] = true
+        root.liveAddrs = live
+      }
+    }
+  }
+
   function bump() {
+    if (!liveClients.running) liveClients.running = true
     Hyprland.refreshToplevels()
     if (Hyprland.refreshMonitors) Hyprland.refreshMonitors()
     tick = (tick + 1) & 0x3fffffff
@@ -161,7 +180,8 @@ BarWidget {
   // ---- Layout --------------------------------------------------------------
   // One scale for everything so each box keeps its window's exact aspect
   // ratio: a full-height window is `thickness` tall. If the tape would be
-  // wider than maxWidth the whole thing shrinks, not just the widths.
+  // wider than maxWidth it scrolls to keep the focused box in view and glows at the edge
+  // that hides more windows.
   readonly property real thickness: Math.max(8, Math.round(barSize * 0.75))
   readonly property real crossSize: monitorSize ? (vertical ? monitorSize.width : monitorSize.height) : 1
   readonly property real mainTotal: {
@@ -169,13 +189,30 @@ BarWidget {
     for (var i = 0; i < columns.length; i++) t += columns[i].len
     return t
   }
-  readonly property real scale: {
-    var base = thickness / crossSize
-    var n = columns.length
-    if (n === 0 || mainTotal <= 0) return base
-    var room = cfg.maxWidth - (n - 1) * cfg.gap
-    return Math.min(base, Math.max(0.0001, room / mainTotal))
+  readonly property real scale: thickness / crossSize
+
+  // Overflow: the tape keeps its true size and is shown through a maxWidth window.
+  readonly property real viewLen: Math.min(tapeTotal, cfg.maxWidth)
+  readonly property real maxScroll: Math.max(0, tapeTotal - viewLen)
+  property real scrollTarget: 0
+  property real scrollOff: scrollTarget
+  Behavior on scrollOff { SpringAnimation { spring: root.springK; damping: root.springD; epsilon: 0.2 } }
+
+  function updateScroll() {
+    var items = tape.items
+    var target = Math.max(0, Math.min(scrollTarget, maxScroll))
+    var margin = thickness
+    for (var i = 0; i < items.length; i++) {
+      if (!items[i].focused) continue
+      var s = vertical ? items[i].by : items[i].bx
+      var e = s + (vertical ? items[i].bh : items[i].bw)
+      if (s - margin < target) target = s - margin
+      else if (e + margin > target + viewLen) target = e + margin - viewLen
+      break
+    }
+    scrollTarget = Math.max(0, Math.min(target, maxScroll))
   }
+  onMaxScrollChanged: updateScroll()
 
   // ---- Motion ----------------------------------------------------------------
   // Everything physical moves on the same spring so the whole widget feels like
@@ -209,6 +246,7 @@ BarWidget {
     if (sig === tapeSig) return
     tapeSig = sig
     tapeTotal = tape.total
+    updateScroll()
     var seen = {}
     for (var i = 0; i < items.length; i++) {
       var it = items[i]
@@ -392,12 +430,20 @@ BarWidget {
     }
 
     Item {
-      id: tapeItem
+      id: tapeView
       Layout.alignment: Qt.AlignCenter
-      implicitWidth: root.vertical ? root.thickness : root.tapeTotal
-      implicitHeight: root.vertical ? root.tapeTotal : root.thickness
-      Behavior on implicitWidth { SpringAnimation { spring: root.springK; damping: root.springD; epsilon: 0.2 } }
-      Behavior on implicitHeight { SpringAnimation { spring: root.springK; damping: root.springD; epsilon: 0.2 } }
+      clip: true
+      implicitWidth: root.vertical ? root.thickness : Math.min(tapeItem.width, root.cfg.maxWidth)
+      implicitHeight: root.vertical ? Math.min(tapeItem.height, root.cfg.maxWidth) : root.thickness
+
+    Item {
+      id: tapeItem
+      x: root.vertical ? 0 : -root.scrollOff
+      y: root.vertical ? -root.scrollOff : 0
+      width: root.vertical ? root.thickness : root.tapeTotal
+      height: root.vertical ? root.tapeTotal : root.thickness
+      Behavior on width { SpringAnimation { spring: root.springK; damping: root.springD; epsilon: 0.2 } }
+      Behavior on height { SpringAnimation { spring: root.springK; damping: root.springD; epsilon: 0.2 } }
 
       // Where a dragged box will land.
       Rectangle {
@@ -661,6 +707,52 @@ BarWidget {
           }
         }
       }
+
+    }
+
+      // Overflow hint: a glowing line on each edge that hides more windows.
+      Repeater {
+        model: [false, true]
+        Item {
+          id: glow
+          required property bool modelData
+          readonly property bool atEnd: modelData
+          readonly property bool lit: atEnd ? root.scrollOff < root.maxScroll - 1 : root.scrollOff > 1
+          z: 100
+          visible: opacity > 0.01
+          opacity: lit ? 1 : 0
+          Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.InOutSine } }
+          readonly property real glowSize: Math.max(8, root.thickness * 0.6)
+          x: root.vertical ? 0 : (atEnd ? parent.width - width : 0)
+          y: root.vertical ? (atEnd ? parent.height - height : 0) : 0
+          width: root.vertical ? parent.width : glowSize
+          height: root.vertical ? glowSize : parent.height
+          property real breathe: 0.6
+          SequentialAnimation on breathe {
+            running: glow.lit
+            loops: Animation.Infinite
+            NumberAnimation { to: 1; duration: 900; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 0.5; duration: 900; easing.type: Easing.InOutSine }
+          }
+          Rectangle {
+            anchors.fill: parent
+            opacity: glow.breathe * 0.7
+            gradient: Gradient {
+              orientation: root.vertical ? Gradient.Vertical : Gradient.Horizontal
+              GradientStop { position: 0; color: glow.atEnd ? "transparent" : root.accentColor }
+              GradientStop { position: 1; color: glow.atEnd ? root.accentColor : "transparent" }
+            }
+          }
+          Rectangle {
+            color: root.accentColor
+            opacity: 0.6 + glow.breathe * 0.4
+            x: root.vertical ? 0 : (glow.atEnd ? parent.width - 2 : 0)
+            y: root.vertical ? (glow.atEnd ? parent.height - 2 : 0) : 0
+            width: root.vertical ? parent.width : 2
+            height: root.vertical ? 2 : parent.height
+          }
+        }
+      }
     }
   }
 
@@ -686,8 +778,8 @@ BarWidget {
     // settings move to the number and separator.
     onPressed: function (mouse) {
       if (!root.cfg.boxActions && !root.cfg.dragReorder) return
-      var p = mapToItem(tapeItem, mouse.x, mouse.y)
-      if (p.x >= 0 && p.y >= 0 && p.x <= tapeItem.width && p.y <= tapeItem.height) mouse.accepted = false
+      var v = mapToItem(tapeView, mouse.x, mouse.y)
+      if (v.x >= 0 && v.y >= 0 && v.x <= tapeView.width && v.y <= tapeView.height) mouse.accepted = false
     }
     onClicked: root.toggle()
     onWheel: function (wheel) {
@@ -735,7 +827,7 @@ BarWidget {
     if (!cfg.attention) return
     var tops = Hyprland.toplevels ? Hyprland.toplevels.values : []
     var addr = Model.matchNotificationWindow(names,
-      Model.eligibleClients(tops, workspaceId, true).concat(Model.eligibleClients(tops, NaN, true)), pids)
+      Model.eligibleClients(tops, workspaceId, true, liveAddrs).concat(Model.eligibleClients(tops, NaN, true, liveAddrs)), pids)
     if (addr === "") { flashNumber(level); return }
     if (addr === activeAddr) return
     addAlert(addr, level)
