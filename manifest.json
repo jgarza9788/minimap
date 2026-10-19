@@ -21,7 +21,7 @@
     "defaultSection": "center",
     "defaults": {
       "numberStyle": "numbers",
-      "maxWidth": 1000,
+      "maxWidth": 800,
       "gap": 3,
       "showFloating": false,
       "groupStyle": "tabbar",
@@ -69,7 +69,7 @@
         "min": 60,
         "max": 2000,
         "step": 10,
-        "defaultValue": 1000
+        "defaultValue": 800
       },
       {
         "key": "gap",
