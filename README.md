@@ -43,6 +43,15 @@ It works best with `layout = "scrolling"` (boxes follow the real column order), 
 draws a sensible map. Needs `python3` and either `busctl` (systemd) or `inotifywait`
 (inotify-tools) for notification alerts; everything else is built in.
 
+## Remove
+
+```bash
+omarchy plugin remove jgarza.minimap --yes
+```
+
+Then delete the `{ "id": "jgarza.minimap" }` entry from the bar layout in
+`~/.config/omarchy/shell.json` if it is still there. The plugin keeps no files outside its own folder.
+
 ## Using it
 
 | | |
