@@ -17,6 +17,8 @@ Item {
 
   property string style: "smooth"
   property int level: 0
+  // Reduced motion: the alert glow holds steady instead of pulsing.
+  property bool still: false
   property color accent: "#88cc33"
   property color urgent: "#ff3b3b"
   property color warn: "#f2b134"
@@ -73,9 +75,9 @@ Item {
 
   // Glow: rings fading outward from the box, pulsing with the alert. Border
   // only, so the box's own colour is never tinted.
-  property real pulse: 0
+  property real pulse: still ? 0.7 : 0
   SequentialAnimation on pulse {
-    running: fx.level > 0 && fx.visible
+    running: fx.level > 0 && fx.visible && !fx.still
     loops: Animation.Infinite
     NumberAnimation { to: 1; duration: fx.level >= 2 ? 420 : 1100; easing.type: fx.style === "cyberpunk" ? Easing.Linear : Easing.InOutSine }
     NumberAnimation { to: 0; duration: fx.level >= 2 ? 420 : 1100; easing.type: fx.style === "cyberpunk" ? Easing.Linear : Easing.InOutSine }

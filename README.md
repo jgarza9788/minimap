@@ -82,11 +82,12 @@ they are keys on the widget entry.
 | `groupStyle` | `tabbar` `letter` | `tabbar` | how a tabbed window looks |
 | `animStyle` | `smooth` `cyberpunk` `fun` `magic` `ripple` | `smooth` | motion and effects (below) |
 | `attention` | `true` `false` | `true` | alert cues for urgent windows and notifications |
+| `reduceMotion` | `true` `false` | `false` | critically damped springs, no swell, no pulses or effect styles; alerts glow steadily |
 | `showFloating` | `true` `false` | `false` | include floating windows in the map |
 | `stateMarkers` | `true` `false` | `true` | marks for fullscreen / pinned / floating windows |
 | `boxActions` | `true` `false` | `false` | right-click box menu and middle-click close |
 | `dragReorder` | `true` `false` | `false` | right-drag a box to reorder its column |
-| `maxWidth` | 60-600 | `200` | longest the box row may get (px); everything shrinks together past it |
+| `maxWidth` | 60-2000 | `800` | longest the box row may get (px); past it the row scrolls with the focused window |
 | `gap` | 0-12 | `3` | space between boxes (px) |
 
 ## Animation styles

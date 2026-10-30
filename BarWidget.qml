@@ -217,7 +217,9 @@ BarWidget {
   // ---- Motion ----------------------------------------------------------------
   // Everything physical moves on the same spring so the whole widget feels like
   // one material. Lower damping = bouncier, higher spring = snappier.
-  readonly property var motion: Model.motionFor(cfg.animStyle)
+  readonly property var motion: Model.motionFor(cfg.animStyle, cfg.reduceMotion)
+  // Reduced motion drops every flourish: the plain style, critically damped springs, no looping pulses.
+  readonly property string fxStyle: cfg.reduceMotion ? "smooth" : cfg.animStyle
   readonly property real springK: motion.k
   readonly property real springD: motion.d
   // Fixed, not themed: some themes' urgent colour is nearly their accent, and a critical
@@ -311,7 +313,7 @@ BarWidget {
   property string shownLabel: workspaceLabel
   onWorkspaceLabelChanged: {
     if (!ready) { shownLabel = workspaceLabel; return }
-    if (cfg.animStyle === "cyberpunk") {
+    if (fxStyle === "cyberpunk") {
       decodeStep = 0
       decoding = true
       shownLabel = decodedLabel(workspaceLabel, 0)
@@ -363,8 +365,8 @@ BarWidget {
     }
     ScriptAction { script: { root.shownLabel = root.workspaceLabel; numText.yOff = numText.height * 0.5 } }
     ParallelAnimation {
-      NumberAnimation { target: numText; property: "opacity"; to: 1; duration: root.motion.swapIn; easing.type: root.cfg.animStyle === "fun" || root.cfg.animStyle === "magic" ? Easing.OutBack : Easing.OutCubic }
-      NumberAnimation { target: numText; property: "yOff"; to: 0; duration: root.motion.swapIn; easing.type: root.cfg.animStyle === "fun" || root.cfg.animStyle === "magic" ? Easing.OutBack : Easing.OutCubic }
+      NumberAnimation { target: numText; property: "opacity"; to: 1; duration: root.motion.swapIn; easing.type: root.fxStyle === "fun" || root.fxStyle === "magic" ? Easing.OutBack : Easing.OutCubic }
+      NumberAnimation { target: numText; property: "yOff"; to: 0; duration: root.motion.swapIn; easing.type: root.fxStyle === "fun" || root.fxStyle === "magic" ? Easing.OutBack : Easing.OutCubic }
     }
   }
 
@@ -399,7 +401,7 @@ BarWidget {
         anchors.fill: parent
         anchors.margins: -3
         corner: 5
-        style: root.cfg.animStyle
+        style: root.fxStyle
         level: Math.max(root.otherLevel, root.numberFlash)
         accent: root.accentColor
         urgent: root.urgentColor
@@ -502,7 +504,7 @@ BarWidget {
           property real appear: closing || !arrived ? 0 : 1
           Behavior on appear { SpringAnimation { spring: root.springK; damping: root.springD; epsilon: 0.002 } }
           property real pop: 1
-          property real lift: hot ? root.motion.hover : 1
+          property real lift: body.pressed && body.pressedButtons === Qt.LeftButton ? 0.94 : (hot ? root.motion.hover : 1)
           Behavior on lift { SpringAnimation { spring: 4; damping: 0.45; epsilon: 0.002 } }
 
           scale: Math.max(0.001, appear * pop * lift)
@@ -556,7 +558,8 @@ BarWidget {
           BoxFx {
             id: fx
             z: 5
-            style: root.cfg.animStyle
+            style: root.fxStyle
+            still: root.cfg.reduceMotion
             level: rect.attnLevel
             accent: root.accentColor
             urgent: root.urgentColor
@@ -702,7 +705,7 @@ BarWidget {
               }
               else root.focusWindow(rect.address)
             }
-            onEntered: { root.hoverEntered(rect.address); if (root.cfg.animStyle === "ripple") fx.play("click", mouseX, mouseY) }
+            onEntered: { root.hoverEntered(rect.address); if (root.fxStyle === "ripple") fx.play("click", mouseX, mouseY) }
             onExited: root.hoverLeft(rect.address)
           }
         }
@@ -729,7 +732,7 @@ BarWidget {
           height: root.vertical ? glowSize : parent.height
           property real breathe: 0.6
           SequentialAnimation on breathe {
-            running: glow.lit
+            running: glow.lit && !root.cfg.reduceMotion
             loops: Animation.Infinite
             NumberAnimation { to: 1; duration: 900; easing.type: Easing.InOutSine }
             NumberAnimation { to: 0.5; duration: 900; easing.type: Easing.InOutSine }
@@ -762,7 +765,7 @@ BarWidget {
     anchors.fill: parent
     z: 20
     source: layout
-    style: root.cfg.animStyle
+    style: root.fxStyle
     bg: root.bgHex
     accent: root.accentColor
     ox: numHolder.x + numHolder.width / 2
@@ -1542,6 +1545,15 @@ BarWidget {
       OptionRow {
         width: parent.width
         square: true
+        label: "Reduce motion"
+        description: "No bounce, pulses or effects; alerts stay visible"
+        checked: root.cfg.reduceMotion
+        onPicked: root.saveSetting("reduceMotion", !root.cfg.reduceMotion)
+      }
+
+      OptionRow {
+        width: parent.width
+        square: true
         label: "State markers"
         description: "Marks for fullscreen, pinned and floating windows"
         checked: root.cfg.stateMarkers
@@ -1635,7 +1647,7 @@ BarWidget {
 
     implicitHeight: Style.space(24)
     radius: Style.space(5)
-    color: area.containsMouse && enabledRow ? Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.14) : "transparent"
+    color: enabledRow && (area.containsMouse || area.pressed) ? Qt.rgba(root.fg.r, root.fg.g, root.fg.b, area.pressed ? 0.24 : 0.14) : "transparent"
     opacity: enabledRow ? 1 : 0.4
     Behavior on color { ColorAnimation { duration: 120 } }
 
@@ -1674,6 +1686,14 @@ BarWidget {
     implicitHeight: Math.max(mark.height, optTexts.implicitHeight) + Style.space(6)
 
     Rectangle {
+      anchors.fill: parent
+      anchors.margins: -Style.space(2)
+      radius: Style.space(5)
+      color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, optArea.pressed ? 0.18 : (optArea.containsMouse ? 0.08 : 0))
+      Behavior on color { ColorAnimation { duration: 100 } }
+    }
+
+    Rectangle {
       id: mark
       anchors.left: parent.left
       anchors.top: parent.top
@@ -1709,7 +1729,9 @@ BarWidget {
       }
     }
     MouseArea {
+      id: optArea
       anchors.fill: parent
+      hoverEnabled: true
       cursorShape: Qt.PointingHandCursor
       onClicked: opt.picked()
     }

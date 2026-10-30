@@ -23,7 +23,10 @@ ok("focus flagged", built[1].windows[0].focused && !built[1].windows[1].focused)
 ok("stack offsets/spans", built[1].windows[1].off === 500 && built[1].windows[1].span === 500);
 
 const s = M.resolveSettings({ numberStyle: "roman", maxWidth: 99999 });
-ok("settings clamp", s.numberStyle === "roman" && s.maxWidth === 600 && s.gap === 3);
+ok("settings clamp", s.numberStyle === "roman" && s.maxWidth === 2000 && s.gap === 3);
+ok("maxWidth default matches manifest", M.resolveSettings({}).maxWidth === 800);
+ok("reduceMotion: opt-in, critically damped, no swell", M.resolveSettings({}).reduceMotion === false && M.resolveSettings({ reduceMotion: true }).reduceMotion === true
+  && M.motionFor("fun", true).d === 1 && M.motionFor("fun", true).popTo === 1 && M.motionFor("fun", false).popTo > 1);
 // groups (tabbed windows)
 const g = (a, hist) => Object.assign(c(a, 0, 0, 1000, 1000), { grouped: ["0xa1", "0xa2", "0xa3"], focusHistory: hist });
 const grp = [g("0xa1", 5), g("0xa2", 1), g("0xa3", 3), c("0xz", 1000, 0, 1000, 1000)];

@@ -29,7 +29,8 @@
       "attention": true,
       "boxActions": false,
       "dragReorder": false,
-      "stateMarkers": true
+      "stateMarkers": true,
+      "reduceMotion": false
     },
     "schema": [
       {
@@ -147,6 +148,13 @@
         "label": "Attention cues",
         "description": "Highlight windows that are urgent or have a notification: minor (amber) and critical (red).",
         "defaultValue": true
+      },
+      {
+        "key": "reduceMotion",
+        "type": "boolean",
+        "label": "Reduce motion",
+        "description": "Critically damped springs, no swell, no looping pulses or effect styles. Alerts stay visible as a steady glow.",
+        "defaultValue": false
       },
       {
         "key": "stateMarkers",

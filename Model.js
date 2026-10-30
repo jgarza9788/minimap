@@ -431,13 +431,15 @@ function resolveAnimStyle(id) {
 // k/d = spring stiffness/damping; pop* = swell on focus gain; hover = hover
 // scale; swapOut/swapIn = workspace number swap (ms); wobble = degrees.
 var MOTION = {
-  smooth:    { k: 3.0, d: 0.40, popTo: 1.18, popOvershoot: 1.4, popIn: 120, popOut: 520, hover: 1.08, swapOut: 110, swapIn: 240, wobble: 0 },
+  smooth:    { k: 3.0, d: 0.70, popTo: 1.18, popOvershoot: 1.4, popIn: 120, popOut: 520, hover: 1.08, swapOut: 110, swapIn: 240, wobble: 0 },
   cyberpunk: { k: 5.5, d: 0.80, popTo: 1.00, popOvershoot: 0.0, popIn: 60,  popOut: 140, hover: 1.04, swapOut: 70,  swapIn: 90,  wobble: 0 },
   fun:       { k: 2.4, d: 0.18, popTo: 1.38, popOvershoot: 2.8, popIn: 110, popOut: 640, hover: 1.14, swapOut: 120, swapIn: 420, wobble: 10 },
   magic:     { k: 2.6, d: 0.32, popTo: 1.22, popOvershoot: 1.8, popIn: 180, popOut: 620, hover: 1.10, swapOut: 150, swapIn: 360, wobble: 0 },
   ripple:    { k: 3.2, d: 0.50, popTo: 1.06, popOvershoot: 1.0, popIn: 100, popOut: 360, hover: 1.05, swapOut: 100, swapIn: 220, wobble: 0 }
 }
-function motionFor(style) { return MOTION[resolveAnimStyle(style)] }
+// Reduced motion: critically damped (no overshoot), no swell, short fades. Same keys as the styles.
+var CALM = { k: 4.0, d: 1.0, popTo: 1.0, popOvershoot: 0.0, popIn: 60, popOut: 120, hover: 1.03, swapOut: 70, swapIn: 140, wobble: 0 }
+function motionFor(style, reduce) { return reduce === true ? CALM : MOTION[resolveAnimStyle(style)] }
 
 // ---- Attention -------------------------------------------------------------
 // Hyprland's `urgent` event carries the window address (no 0x).
@@ -656,12 +658,13 @@ function resolveSettings(raw) {
   var s = raw || {}
   return {
     numberStyle: resolveNumberStyle(String(s.numberStyle || "")),
-    maxWidth: clampInt(s.maxWidth, 60, 600, 200),
+    maxWidth: clampInt(s.maxWidth, 60, 2000, 800),
     gap: clampInt(s.gap, 0, 12, 3),
     showFloating: s.showFloating === true,
     groupStyle: resolveGroupStyle(String(s.groupStyle || "")),
     animStyle: resolveAnimStyle(String(s.animStyle || "")),
     attention: s.attention !== false,
+    reduceMotion: s.reduceMotion === true,
     boxActions: s.boxActions === true,
     dragReorder: s.dragReorder === true,
     stateMarkers: s.stateMarkers !== false
