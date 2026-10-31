@@ -139,4 +139,33 @@ ok("swapCommands: junk refused", M.swapCommands(["r", "x"], true).length === 0 &
   console.log("ok live filter")
 })()
 
+// all screens
+const mons = [
+  { name: "eDP-1", workspaceId: 11, scale: 2, width: 3840, height: 2400, x: -960, y: 0 },
+  { name: "DP-5", workspaceId: 1, scale: 1.25, width: 5120, height: 2160, x: -2048, y: -1728 },
+  { name: "HDMI", workspaceId: -98, scale: 1, width: 1920, height: 1080, x: 0, y: 0 }];
+const one = M.screenSegments(mons, "eDP-1", false, false);
+ok("one screen: the bar's own", one.length === 1 && one[0].workspaceId === 11 && one[0].size.width === 1920 && one[0].cross === 1200);
+const all = M.screenSegments(mons, "eDP-1", true, false);
+ok("all screens: lowest workspace first, special skipped", all.map(s => s.workspaceId).join() === "1,11");
+ok("segment viewport in layout coords", all[0].viewport.start === -2048 && all[0].viewport.end === -2048 + 4096);
+const sc = M.scaleColumns([{ len: 100, windows: [{ off: 10, span: 50 }] }], 0.5);
+ok("scale columns", sc[0].len === 50 && sc[0].windows[0].off === 5 && sc[0].windows[0].span === 25);
+const joined = M.joinSegments(all, [[{ key: "a", len: 10, windows: [] }], [{ key: "b", len: 20, windows: [] }]], [0, 7], ["1", "11"]);
+ok("join: header before later segments", joined.map(c => c.key).join() === "a,screen:eDP-1,b" && joined[1].len === 7
+  && joined[1].header.workspaceId === 11);
+const jt = M.layoutTape(joined, { scale: 1, gap: 2, stackGap: 3, vertical: false });
+ok("header carried into tape bounds", jt.cols[1].header.label === "11" && jt.cols[1].start === 12);
+const screenCols = [{ start: 0, len: 10 }, { start: 12, len: 10 }, { start: 24, len: 5, header: {} }, { start: 31, len: 10 }, { start: 43, len: 10 }];
+ok("screen range stops at headers", JSON.stringify(M.screenRange(screenCols, 1)) === '{"first":0,"last":1}'
+  && JSON.stringify(M.screenRange(screenCols, 4)) === '{"first":3,"last":4}');
+ok("drag target stays on its screen", M.slotWithin(screenCols, 50, 0) === 1 && M.slotWithin(screenCols, 0, 4) === 3
+  && M.slotWithin(screenCols, 5, 1) === 0);
+ok("single screen: whole tape", M.slotWithin([{ start: 0, len: 10 }, { start: 12, len: 10 }], 20, 0) === 1);
+ok("swap window command", M.swapWindowCommand("0xAB", true) === 'hl.dsp.window.swap({ target = "address:0xab" })'
+  && M.swapWindowCommand("0xab", false) === "swapwindow address:0xab" && M.swapWindowCommand("", true) === "");
+ok("layout option parse", M.parseLayoutOption('{"option":"general:layout","str":"dwindle","set":true}') === "dwindle"
+  && M.parseLayoutOption("nope") === "");
+ok("allScreens default off", M.resolveSettings({}).allScreens === false && M.resolveSettings({ allScreens: true }).allScreens === true);
+
 process.exit(failed ? 1 : 0);
