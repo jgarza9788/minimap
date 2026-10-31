@@ -93,8 +93,10 @@ BarWidget {
     return vertical ? { start: my, end: my + mh } : { start: mx, end: mx + mw }
   }
 
+  // Hyprland.activeToplevel stays null after a shell restart until focus next moves; the
+  // focused window from `hyprctl clients` (focusHistoryID 0) covers that gap.
   readonly property string activeAddr: Model.normalizeAddress(
-    Hyprland.activeToplevel ? Hyprland.activeToplevel.address : "")
+    Hyprland.activeToplevel ? Hyprland.activeToplevel.address : liveFocused)
 
   readonly property var rawColumns: {
     var _dep = tick
@@ -118,6 +120,7 @@ BarWidget {
   // Addresses `hyprctl clients` reports right now. Quickshell can keep a toplevel for a window
   // that is gone, which would draw a phantom box; null until the first good read.
   property var liveAddrs: null
+  property string liveFocused: ""
   Process {
     id: liveClients
     command: ["hyprctl", "clients", "-j"]
@@ -127,8 +130,13 @@ BarWidget {
         try { list = JSON.parse(text) } catch (e) { return }
         if (!Array.isArray(list)) return
         var live = {}
-        for (var i = 0; i < list.length; i++) live[Model.normalizeAddress(list[i].address)] = true
+        var focused = ""
+        for (var i = 0; i < list.length; i++) {
+          live[Model.normalizeAddress(list[i].address)] = true
+          if (list[i].focusHistoryID === 0) focused = Model.normalizeAddress(list[i].address)
+        }
         root.liveAddrs = live
+        root.liveFocused = focused
       }
     }
   }
