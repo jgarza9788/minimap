@@ -1033,7 +1033,7 @@ BarWidget {
       providerId: modelData
       scriptPath: root.localPath("providers/" + modelData + ".py")
       onLayoutsChanged: root.setPaneLayouts(providerId, layouts)
-      Component.onDestruction: root.setPaneLayouts(providerId, [])
+      Component.onDestruction: { try { root.setPaneLayouts(providerId, []) } catch (e) {} }   // the bar may be going too
     }
   }
   function paneKey(addr, index) { return addr + "/pane/" + index }
