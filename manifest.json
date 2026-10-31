@@ -29,7 +29,11 @@
       "attention": true,
       "boxActions": false,
       "dragReorder": false,
-      "stateMarkers": true
+      "stateMarkers": true,
+      "herdrPanes": true,
+      "tmuxPanes": true,
+      "paneStatus": true,
+      "paneAlerts": true
     },
     "schema": [
       {
@@ -168,6 +172,34 @@
         "label": "Drag to reorder",
         "description": "Hold the right mouse button on a box and drag sideways to move its column (the bar keeps left-drag for moving widgets).",
         "defaultValue": false
+      },
+      {
+        "key": "herdrPanes",
+        "type": "boolean",
+        "label": "herdr panes",
+        "description": "Split a terminal's box into the panes of the herdr tab it shows, with the focused pane brightest.",
+        "defaultValue": true
+      },
+      {
+        "key": "tmuxPanes",
+        "type": "boolean",
+        "label": "tmux panes",
+        "description": "Split a terminal's box into the panes of the tmux window it shows, with the focused pane brightest.",
+        "defaultValue": true
+      },
+      {
+        "key": "paneStatus",
+        "type": "boolean",
+        "label": "Agent status colours",
+        "description": "Colour panes running a coding agent: amber pulse when it is waiting for you, green when it has finished, a soft breathing pulse while it works.",
+        "defaultValue": true
+      },
+      {
+        "key": "paneAlerts",
+        "type": "boolean",
+        "label": "Agent alerts",
+        "description": "Raise an amber alert on a terminal when an agent in one of its panes starts waiting for you, even on another workspace or herdr tab. Needs Attention cues.",
+        "defaultValue": true
       }
     ]
   }

@@ -71,6 +71,21 @@ a right-click on the number or separator (and there is a "Settings..." row in th
 > widget around the bar, so a left-drag never reaches the boxes. Left-*clicks* do, and the right
 > button is free.
 
+## App panes
+
+A terminal running [herdr](https://herdr.dev) or tmux gets its box split into that app's panes,
+in their real proportions, with the focused pane brightest. Hover a pane to see its name.
+
+Panes running a coding agent (herdr tracks Claude, Codex, pi and others) are coloured by what
+the agent is doing: **amber, pulsing** while it waits for you, **green** when it has finished,
+a soft **breathing** while it works. An agent that starts waiting raises a minor alert on its
+terminal like a notification would, even from another workspace or herdr tab; it clears when you
+focus the terminal or the agent stops waiting.
+
+Nothing polls: each app is watched by a small provider in `providers/` that subscribes to the
+app's own events (herdr's socket API, tmux control mode). Adding another app is one file; see
+[`providers/README.md`](providers/README.md).
+
 ## Settings
 
 All of these are in the right-click popup and in the plugin's settings schema; in `shell.json`
@@ -86,6 +101,10 @@ they are keys on the widget entry.
 | `stateMarkers` | `true` `false` | `true` | marks for fullscreen / pinned / floating windows |
 | `boxActions` | `true` `false` | `false` | right-click box menu and middle-click close |
 | `dragReorder` | `true` `false` | `false` | right-drag a box to reorder its column |
+| `herdrPanes` | `true` `false` | `true` | split a terminal's box into its [herdr](https://herdr.dev) panes |
+| `tmuxPanes` | `true` `false` | `true` | split a terminal's box into its tmux panes |
+| `paneStatus` | `true` `false` | `true` | colour agent panes: amber waiting, green done, breathing working |
+| `paneAlerts` | `true` `false` | `true` | alert when an agent starts waiting for you (needs `attention`) |
 | `maxWidth` | 60-600 | `200` | longest the box row may get (px); everything shrinks together past it |
 | `gap` | 0-12 | `3` | space between boxes (px) |
 

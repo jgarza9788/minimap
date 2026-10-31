@@ -231,6 +231,9 @@ BarWidget {
   // Fixed, not themed: some themes' urgent colour is nearly their accent, and a critical
   // alert must never look like the focused box.
   readonly property color urgentColor: "#ff3b3b"
+  // Agent status in panes; amber matches the minor-alert colour (BoxFx.warn).
+  readonly property color warnColor: "#f2b134"
+  readonly property color doneColor: "#3fbf6a"
 
   // The tape: flat absolutely-positioned rows, reconciled into a ListModel so
   // each box keeps its delegate and glides when windows open, close or resize.
@@ -493,6 +496,7 @@ BarWidget {
           readonly property color ink: (0.299 * color.r + 0.587 * color.g + 0.114 * color.b) > 0.45
             ? Qt.color(root.bgHex) : root.fg
           readonly property bool hot: root.hoverAddr !== "" && !closing && (root.hoverAddr === address
+            || root.hoverAddr.indexOf(address + "/pane/") === 0
             || tabsData.some(function (t) { return t.address === root.hoverAddr }))
 
           // Geometry glides on springs; a brand-new box starts exactly in place.
@@ -584,6 +588,111 @@ BarWidget {
           Component.onCompleted: { reg(); Qt.callLater(function () { rect.arrived = true; if (rect.fresh) fx.play("appear") }) }
           Component.onDestruction: {
             try { if (regAddr !== "") root.unregisterItem(regAddr, rect); root.hoverLeft(regAddr) } catch (e) {}
+          }
+
+          // App panes: the box splits into the panes of the herdr tab / tmux window inside
+          // it; the other panes dim so the focused one stands out. Hovering a pane names it.
+          // Delegates are per index (not per geometry) so they survive the box's resize springs.
+          Item {
+            id: appPanes
+            z: 3
+            anchors.fill: parent
+            readonly property var layout: root.paneMap[rect.address] || null
+            visible: layout !== null && !rect.tabbed && !rect.closing && rect.width >= 6
+            readonly property real gap: Math.max(1, Math.min(2, root.cfg.gap / 2))
+            readonly property var geo: visible
+              ? Model.paneRects(layout, width, height, gap)
+              : { panes: [], dividers: [] }
+            Repeater {
+              model: appPanes.geo.panes.length
+              Item {
+                id: paneItem
+                required property int index
+                readonly property var pane: appPanes.geo.panes[index] || { x: 0, y: 0, w: 0, h: 0, focused: true, status: "" }
+                readonly property string status: root.cfg.paneStatus ? pane.status : ""
+                x: pane.x; y: pane.y; width: pane.w; height: pane.h
+
+                Rectangle {
+                  anchors.fill: parent
+                  color: root.bgHex
+                  opacity: paneItem.pane.focused || paneItem.status === "blocked" || paneItem.status === "done" ? 0 : 0.35
+                }
+                // Agent status: amber pulse = waiting for you, green = finished, breathing = working.
+                Rectangle {
+                  id: statusFill
+                  anchors.fill: parent
+                  visible: paneItem.status === "blocked" || paneItem.status === "done"
+                  // Pulses in brightness like a box alert, never letting the box colour through.
+                  color: paneItem.status === "blocked" ? Qt.lighter(root.warnColor, 1 + 0.3 * pulse) : root.doneColor
+                  property real pulse: 0
+                  SequentialAnimation on pulse {
+                    running: statusFill.visible && paneItem.status === "blocked"
+                    loops: Animation.Infinite
+                    NumberAnimation { from: 0; to: 1; duration: 520; easing.type: Easing.InOutSine }
+                    NumberAnimation { from: 1; to: 0; duration: 520; easing.type: Easing.InOutSine }
+                  }
+                }
+                Rectangle {
+                  id: workingFill
+                  anchors.fill: parent
+                  visible: paneItem.status === "working"
+                  color: root.bgHex
+                  property real breath: 0
+                  // Stays under the 0.35 unfocused dim so the focused pane still reads as focused.
+                  opacity: 0.04 + 0.18 * breath
+                  SequentialAnimation on breath {
+                    running: workingFill.visible
+                    loops: Animation.Infinite
+                    NumberAnimation { from: 0; to: 1; duration: 1100; easing.type: Easing.InOutSine }
+                    NumberAnimation { from: 1; to: 0; duration: 1100; easing.type: Easing.InOutSine }
+                  }
+                }
+              }
+            }
+            Repeater {
+              model: appPanes.geo.dividers.length
+              Rectangle {
+                required property int index
+                readonly property var divider: appPanes.geo.dividers[index] || { x: 0, y: 0, w: 0, h: 0 }
+                x: divider.x; y: divider.y; width: divider.w; height: divider.h
+                color: root.bgHex
+              }
+            }
+            // Hover targets, grown over the dividers so moving between panes never falls back to
+            // the window's own label. They take no buttons: clicks reach the box underneath.
+            Repeater {
+              model: appPanes.geo.panes.length
+              Item {
+                id: paneHit
+                required property int index
+                readonly property var pane: appPanes.geo.panes[index] || { x: 0, y: 0, w: 0, h: 0 }
+                readonly property string key: root.paneKey(rect.address, index)
+                x: pane.x - appPanes.gap / 2; y: pane.y - appPanes.gap / 2
+                width: pane.w + appPanes.gap; height: pane.h + appPanes.gap
+
+                property string regKey: ""
+                function reg() {
+                  if (regKey === key) return
+                  if (regKey !== "") root.unregisterItem(regKey, paneHit)
+                  regKey = key
+                  root.registerItem(key, paneHit, 2)
+                }
+                onKeyChanged: reg()
+                Component.onCompleted: reg()
+                Component.onDestruction: {
+                  try { if (regKey !== "") root.unregisterItem(regKey, paneHit) } catch (e) {}
+                }
+
+                MouseArea {
+                  anchors.fill: parent
+                  acceptedButtons: Qt.NoButton
+                  hoverEnabled: true
+                  enabled: appPanes.visible
+                  onEntered: root.hoverEntered(paneHit.key)
+                  onExited: root.hoverLeft(paneHit.key)
+                }
+              }
+            }
           }
 
           // Style "letter": a t in the middle of the box.
@@ -876,10 +985,11 @@ BarWidget {
 
   // Desktop notifications from ANY daemon (bin/notify-watch listens on the
   // session bus; it falls back to Omarchy's notification files via inotifywait).
-  function script(name) {
-    var value = String(Qt.resolvedUrl("bin/" + name))
+  function localPath(rel) {
+    var value = String(Qt.resolvedUrl(rel))
     return value.indexOf("file://") === 0 ? decodeURIComponent(value.substring(7)) : value
   }
+  function script(name) { return localPath("bin/" + name) }
   // If the watcher dies, bring it back (2 s, doubling to 30 s) instead of
   // leaving alerts silently dead.
   property bool notifRun: true
@@ -910,6 +1020,71 @@ BarWidget {
         root.raiseAlert(n.names, n.pids, n.level)
       }
     }
+  }
+
+  // App panes: each enabled provider (providers/<id>.py, see providers/README.md) reports the
+  // pane layouts of its app, and a box running one is split into those panes.
+  property var paneLayouts: ({})            // provider id -> its latest layouts
+  Instantiator {
+    id: providerWatches
+    model: root.cfg.paneProviders
+    delegate: ProviderWatch {
+      required property string modelData
+      providerId: modelData
+      scriptPath: root.localPath("providers/" + modelData + ".py")
+      onLayoutsChanged: root.setPaneLayouts(providerId, layouts)
+      Component.onDestruction: root.setPaneLayouts(providerId, [])
+    }
+  }
+  function paneKey(addr, index) { return addr + "/pane/" + index }
+  function refreshPanes(addr) {
+    var layout = paneMap[addr]
+    if (!layout) return
+    for (var i = 0; i < providerWatches.count; i++) {
+      var w = providerWatches.objectAt(i)
+      if (w && w.providerId === layout.provider) w.refresh()
+    }
+  }
+  function setPaneLayouts(id, list) {
+    var next = Object.assign({}, paneLayouts)
+    if (list.length) next[id] = list
+    else delete next[id]
+    paneLayouts = next
+  }
+  // Every workspace, not just this one: agent alerts come from anywhere.
+  readonly property var paneMap: {
+    var _dep = tick
+    var all = []
+    for (var id in paneLayouts) all = all.concat(paneLayouts[id])
+    if (!all.length) return ({})
+    var tops = Hyprland.toplevels ? Hyprland.toplevels.values : []
+    return Model.layoutsByAddress(Model.eligibleClients(tops, NaN, true, liveAddrs), all)
+  }
+
+  // Agent alerts: a pane that starts waiting for you raises a minor alert on its window, like a
+  // notification would (amber box, lit number on other workspaces, click the number to go there).
+  // Unlike a notification, it also goes away by itself once no agent in the window is waiting.
+  property var paneSeen: ({})
+  property var paneAlerted: ({})            // windows whose current alert came from an agent
+  onPaneMapChanged: {
+    var r = Model.paneAlerts(paneSeen, paneMap)
+    paneSeen = r.seen
+    for (var s = 0; s < r.settled.length; s++)
+      if (paneAlerted[r.settled[s]]) dropAlert(r.settled[s])
+    if (!cfg.paneAlerts) return
+    for (var i = 0; i < r.raise.length; i++) {
+      if (r.raise[i] === activeAddr) continue
+      addAlert(r.raise[i], 1)
+      paneAlerted[r.raise[i]] = true
+    }
+  }
+  function dropAlert(addr) {
+    delete paneAlerted[addr]
+    if (!(addr in alerts)) return
+    var next = Object.assign({}, alerts)
+    delete next[addr]
+    alerts = next
+    reconcile()
   }
 
   // ---- Box actions menu -------------------------------------------------------
@@ -1034,7 +1209,13 @@ BarWidget {
   function unregisterItem(addr, item) {
     if (items[addr] && items[addr].item === item) { delete items[addr]; itemsRev++ }
   }
-  function hoverEntered(addr) { hoverClear.stop(); hoverAddr = addr }
+  function hoverEntered(addr) {
+    hoverClear.stop()
+    // Entering a box (or moving onto it from elsewhere) asks its pane provider for fresh labels.
+    var win = addr.split("/pane/")[0]
+    if (win !== hoverAddr.split("/pane/")[0]) refreshPanes(win)
+    hoverAddr = addr
+  }
   function hoverLeft(addr) { if (hoverAddr === addr) hoverClear.restart() }
 
   Timer { interval: 1500; running: true; onTriggered: root.ready = true }
@@ -1051,14 +1232,28 @@ BarWidget {
   readonly property string shownAddr: hoverAddr !== "" ? hoverAddr : peekAddr
   readonly property var shownWin: {
     if (shownAddr === "") return null
+    // A hovered pane: its label, with its window's icon. No label: the window's own.
+    var at = shownAddr.indexOf("/pane/")
+    if (at !== -1) {
+      var winAddr = shownAddr.substring(0, at)
+      var pane = Model.paneAt(paneMap[winAddr], Number(shownAddr.substring(at + 6)))
+      var owner = windowAt(winAddr)
+      if (!owner) return null
+      if (!pane || !pane.label) return owner
+      var title = String(pane.label) + (pane.status === "blocked" && cfg.paneStatus ? "  \u00b7  waiting for you" : "")
+      return { address: shownAddr, title: title, appClass: owner.appClass }
+    }
+    return windowAt(shownAddr)
+  }
+  function windowAt(addr) {
     for (var i = 0; i < columns.length; i++)
       for (var j = 0; j < columns[i].windows.length; j++)
       {
         var w = columns[i].windows[j]
-        if (w.address === shownAddr) return w
+        if (w.address === addr) return w
         if (w.tabs)
           for (var k = 0; k < w.tabs.length; k++)
-            if (w.tabs[k].address === shownAddr) return w.tabs[k]
+            if (w.tabs[k].address === addr) return w.tabs[k]
       }
     return null
   }
@@ -1554,6 +1749,37 @@ BarWidget {
         description: "Marks for fullscreen, pinned and floating windows"
         checked: root.cfg.stateMarkers
         onPicked: root.saveSetting("stateMarkers", !root.cfg.stateMarkers)
+      }
+
+      OptionRow {
+        width: parent.width
+        square: true
+        label: "Agent status colours"
+        description: "Amber: waiting for you, green: done, pulsing: working"
+        checked: root.cfg.paneStatus
+        onPicked: root.saveSetting("paneStatus", !root.cfg.paneStatus)
+      }
+
+      OptionRow {
+        width: parent.width
+        square: true
+        label: "Agent alerts"
+        description: "Alert when an agent starts waiting for you, on any workspace"
+        checked: root.cfg.paneAlerts
+        onPicked: root.saveSetting("paneAlerts", !root.cfg.paneAlerts)
+      }
+
+      Repeater {
+        model: Model.PANE_PROVIDERS
+        OptionRow {
+          required property var modelData
+          width: parent.width
+          square: true
+          label: modelData.label
+          description: modelData.description
+          checked: root.cfg.paneProviders.indexOf(modelData.id) !== -1
+          onPicked: root.saveSetting(modelData.key, !checked)
+        }
       }
 
       OptionRow {

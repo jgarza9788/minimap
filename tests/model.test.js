@@ -139,4 +139,43 @@ ok("swapCommands: junk refused", M.swapCommands(["r", "x"], true).length === 0 &
   console.log("ok live filter")
 })()
 
+// app panes
+const hl = { match: { pids: [50, 40, 1] }, zoomed: false, area: { x: 0, y: 0, width: 100, height: 50 },
+  panes: [{ x: 0, y: 0, width: 50, height: 50, focused: false }, { x: 50, y: 0, width: 50, height: 25, focused: true },
+          { x: 50, y: 25, width: 50, height: 25, focused: false, status: "blocked" }] };
+const parsed = M.parsePaneLayouts(JSON.stringify([hl, { nope: 1 }]), "herdr");
+ok("pane layouts parse and tag", parsed.length === 1 && parsed[0].provider === "herdr"
+  && M.parsePaneLayouts("{}", "x") === null && M.parsePaneLayouts("junk", "x") === null);
+const win = (a, pid) => Object.assign(c(a, 0, 0, 10, 10), { pid });
+const hm = M.layoutsByAddress([win("0xa", 40), win("0xb", 7)], [hl]);
+ok("matched by ancestor pid", hm["0xa"] === hl && !hm["0xb"]);
+const inner = { match: { pids: [60, 50, 40] }, area: hl.area, panes: [] };
+ok("nearest match wins", M.layoutsByAddress([win("0xa", 40)], [inner, hl])["0xa"] === hl);
+const byPid = { match: { pid: 7 }, area: hl.area, panes: [] }, byAddr = { match: { address: "0xB" }, area: hl.area, panes: [] };
+ok("matched by pid and address", M.layoutsByAddress([win("0xb", 7)], [byPid])["0xb"] === byPid
+  && M.layoutsByAddress([win("0xb", 0)], [byAddr])["0xb"] === byAddr);
+const hr = M.paneRects(hl, 20, 10, 1);
+ok("panes scaled", hr.panes.length === 3 && hr.panes[1].x === 10 && hr.panes[1].w === 10 && hr.panes[1].h === 5);
+ok("pane status carried", hr.panes[2].status === "blocked" && hr.panes[0].status === "");
+ok("dividers inside only", hr.dividers.length === 2 && hr.dividers[0].x === 9.5 && hr.dividers[1].y === 4.5);
+const hz = M.paneRects(Object.assign({}, hl, { zoomed: true }), 20, 10, 1);
+ok("paneAt follows drawn order", M.paneAt(hl, 2).status === "blocked"
+  && M.paneAt(Object.assign({}, hl, { zoomed: true }), 0).focused === true && M.paneAt(hl, 9) === null);
+const wl = (st, hiddenSt) => ({ "0xa": { panes: [{ id: "p1", status: st }, { id: "p2" }], hidden: hiddenSt ? [{ id: "p9", status: hiddenSt }] : [] } });
+let pa = M.paneAlerts({}, wl("working"));
+ok("no alert while working", pa.raise.length === 0 && pa.seen["0xa|p1"] === "working");
+pa = M.paneAlerts(pa.seen, wl("blocked"));
+ok("alert when a pane starts waiting", pa.raise.join() === "0xa");
+ok("no repeat while still waiting", M.paneAlerts(pa.seen, wl("blocked")).raise.length === 0);
+ok("alert from a hidden tab", M.paneAlerts({}, wl("idle", "blocked")).raise.join() === "0xa");
+ok("settled once nothing waits", M.paneAlerts(pa.seen, wl("working")).settled.join() === "0xa"
+  && M.paneAlerts(pa.seen, wl("blocked")).settled.length === 0);
+ok("window gone settles too", M.paneAlerts(pa.seen, {}).settled.join() === "0xa");
+ok("blocked on first sight alerts", M.paneAlerts({}, wl("blocked")).raise.join() === "0xa");
+ok("agent alerts default on", M.resolveSettings({}).paneAlerts === true && M.resolveSettings({ paneAlerts: false }).paneAlerts === false);
+ok("zoomed is one pane", hz.panes.length === 1 && hz.panes[0].w === 20 && hz.dividers.length === 0);
+ok("status colours default on", M.resolveSettings({}).paneStatus === true && M.resolveSettings({ paneStatus: false }).paneStatus === false);
+ok("settings providers default on", M.resolveSettings({}).paneProviders.join() === "herdr,tmux"
+  && M.resolveSettings({ herdrPanes: false }).paneProviders.join() === "tmux");
+
 process.exit(failed ? 1 : 0);
