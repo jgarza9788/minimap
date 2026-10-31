@@ -303,8 +303,10 @@ BarWidget {
   property real animHeight: layout.implicitHeight
   Behavior on animWidth { SpringAnimation { spring: root.springK; damping: root.springD; epsilon: 0.2 } }
   Behavior on animHeight { SpringAnimation { spring: root.springK; damping: root.springD; epsilon: 0.2 } }
-  implicitWidth: animWidth
-  implicitHeight: animHeight
+  // As tall (wide, on a vertical bar) as the bar itself, with the content centred, so the
+  // number lines up with the bar's own text, which is centred on the bar's full size.
+  implicitWidth: vertical ? Math.max(animWidth, barSize) : animWidth
+  implicitHeight: vertical ? animHeight : Math.max(animHeight, barSize)
 
   // Workspace label: slides up and out, the new one slides in from below.
   readonly property string workspaceLabel: Model.formatWorkspace(workspaceId, cfg.numberStyle)
@@ -370,8 +372,8 @@ BarWidget {
 
   GridLayout {
     id: layout
-    x: 0
-    y: 0
+    x: root.vertical ? Math.round((root.implicitWidth - implicitWidth) / 2) : 0
+    y: root.vertical ? 0 : Math.round((root.implicitHeight - implicitHeight) / 2)
     columns: root.vertical ? 1 : 3
     rowSpacing: Style.space(8)
     columnSpacing: Style.space(10)
@@ -379,6 +381,10 @@ BarWidget {
     Item {
       id: numHolder
       Layout.alignment: Qt.AlignCenter
+      // Lead in so a number right after the bar's workspace switcher keeps its rhythm: the switcher
+      // centres digits in Style.space(20) slots, Style.space(1) apart, and ends with a 1.5 trailing
+      // gap, so the next digit's centre is space(21) on: half a slot plus 9.5.
+      Layout.leftMargin: root.vertical ? 0 : Math.max(0, Math.round(Style.spaceReal(9.5) - numText.implicitWidth / 2))
       implicitWidth: numText.implicitWidth
       implicitHeight: numText.implicitHeight
       Behavior on implicitWidth { SpringAnimation { spring: root.springK; damping: root.springD; epsilon: 0.2 } }
@@ -413,9 +419,10 @@ BarWidget {
         y: yOff
         text: root.shownLabel
         color: root.decoding ? "#5ff3ff" : root.accentColor
+        // The bar's own text style (WidgetButton: bar font, body size, regular weight).
         font.family: root.fontFamily
-        font.pixelSize: Math.round(Style.font.body * 1.35)
-        font.bold: true
+        font.pixelSize: Style.font.body
+        renderType: Text.NativeRendering
         Behavior on color { ColorAnimation { duration: root.decoding ? 0 : 260; easing.type: Easing.InOutSine } }
       }
     }
