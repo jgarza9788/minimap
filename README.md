@@ -61,7 +61,7 @@ Then delete the `{ "id": "jgarza.minimap" }` entry from the bar layout in
 | **Click the number** | jump to whatever is alerting (critical first, then the newest) |
 | **Right-click** | settings (or the box menu when *Box actions* is on) |
 | **Middle-click** a box | close that window (*Box actions* on) |
-| **Right-drag** a box | move its column left or right (*Drag to reorder* on) |
+| **Right-drag** a box | move its column left or right; on non-scrolling layouts (dwindle, master) it swaps with the window you drop it on (*Drag to reorder* on) |
 
 *Box actions* and *Drag to reorder* are off by default, because they close and rearrange your
 windows. Switch them on in the right-click settings. With *Box actions* on, the settings move to
@@ -82,6 +82,7 @@ they are keys on the widget entry.
 | `groupStyle` | `tabbar` `letter` | `tabbar` | how a tabbed window looks |
 | `animStyle` | `smooth` `cyberpunk` `fun` `magic` `ripple` | `smooth` | motion and effects (below) |
 | `attention` | `true` `false` | `true` | alert cues for urgent windows and notifications |
+| `allScreens` | `true` `false` | `false` | every monitor's active workspace side by side, lowest number first (a dragged column stays on its own screen) |
 | `showFloating` | `true` `false` | `false` | include floating windows in the map |
 | `stateMarkers` | `true` `false` | `true` | marks for fullscreen / pinned / floating windows |
 | `boxActions` | `true` `false` | `false` | right-click box menu and middle-click close |

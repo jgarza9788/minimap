@@ -68,40 +68,67 @@ BarWidget {
     return Hyprland.focusedMonitor || null
   }
 
+  // The screens drawn: this bar's monitor, or with allScreens every monitor's active workspace,
+  // lowest number first. The first one owns the big number; the rest get a header in the tape.
+  readonly property var segments: {
+    var _dep = tick
+    var ms = Hyprland.monitors ? Hyprland.monitors.values : []
+    var plain = []
+    for (var i = 0; i < ms.length; i++) {
+      var m = ms[i]
+      if (!m) continue
+      plain.push({ name: String(m.name), workspaceId: m.activeWorkspace ? Number(m.activeWorkspace.id) : -1,
+                   scale: Number(m.scale), width: Number(m.width), height: Number(m.height),
+                   x: Number(m.x), y: Number(m.y) })
+    }
+    return Model.screenSegments(plain, barMonitor ? String(barMonitor.name) : screenName, cfg.allScreens, vertical)
+  }
+  readonly property bool multiScreen: segments.length > 1
+  function screenFocused(name) { return Hyprland.focusedMonitor && String(Hyprland.focusedMonitor.name) === name }
+
   readonly property int workspaceId: {
-    var m = barMonitor
-    if (m && m.activeWorkspace && isFinite(Number(m.activeWorkspace.id)))
-      return Number(m.activeWorkspace.id)
+    if (segments.length) return segments[0].workspaceId
     return Hyprland.focusedWorkspace ? Hyprland.focusedWorkspace.id : -1
   }
-
-  readonly property var monitorSize: {
-    var m = barMonitor
-    if (!m) return null
-    var s = Number(m.scale) || 1
-    var w = Number(m.width) / s, h = Number(m.height) / s
-    return w > 0 && h > 0 ? { width: w, height: h, x: Number(m.x) || 0, y: Number(m.y) || 0 } : null
-  }
-
-  readonly property var viewportRange: {
-    var m = barMonitor
-    if (!m) return null
-    var s = Number(m.scale) || 1
-    var mx = Number(m.x), my = Number(m.y)
-    var mw = Number(m.width) / s, mh = Number(m.height) / s
-    if (!isFinite(mx) || !isFinite(my) || !(mw > 0) || !(mh > 0)) return null
-    return vertical ? { start: my, end: my + mh } : { start: mx, end: mx + mw }
-  }
+  readonly property var monitorSize: segments.length ? segments[0].size : null
+  readonly property var viewportRange: segments.length ? segments[0].viewport : null
 
   readonly property string activeAddr: Model.normalizeAddress(
     Hyprland.activeToplevel ? Hyprland.activeToplevel.address : "")
 
+  // Every screen's columns in one tape, each resized so a full-height window is `thickness` tall
+  // whatever the monitor's height.
   readonly property var rawColumns: {
     var _dep = tick
-    if (workspaceId < 0 || !monitorSize) return []
+    if (!segments.length) return []
     var tops = Hyprland.toplevels ? Hyprland.toplevels.values : []
-    var clients = Model.eligibleClients(tops, workspaceId, cfg.showFloating, liveAddrs)
-    return Model.buildColumns(clients, monitorSize, viewportRange, vertical, activeAddr)
+    var per = [], heads = [], labels = []
+    for (var i = 0; i < segments.length; i++) {
+      var seg = segments[i]
+      var clients = Model.eligibleClients(tops, seg.workspaceId, cfg.showFloating, liveAddrs)
+      var cols = Model.buildColumns(clients, seg.size, seg.viewport, vertical, activeAddr)
+      per.push(Model.scaleColumns(cols, segments[0].cross / seg.cross))
+      labels.push(Model.formatWorkspace(seg.workspaceId, cfg.numberStyle))
+      heads.push(i > 0 ? headerLen(labels[i]) / scale : 0)
+    }
+    return Model.joinSegments(segments, per, heads, labels)
+  }
+
+  // A later screen's header in the tape: | separator | number |, spaced like the big number's.
+  // The tape's own gaps either side count towards it.
+  readonly property real headerSpace: Style.space(10)
+  function headerLen(label) {
+    var main = vertical ? numMetrics.height : numMetrics.advanceWidth(label)
+    return Math.max(0, 3 * headerSpace + 1 + main - 2 * cfg.gap)
+  }
+  FontMetrics {
+    id: numMetrics
+    font.family: root.fontFamily
+    font.pixelSize: Math.round(Style.font.body * 1.35)
+    font.bold: true
+  }
+  function goWorkspace(id) {
+    dispatch("hl.dsp.focus({ workspace = \"" + id + "\" })", "workspace " + id)
   }
 
   // Only swap the model when the drawn data really changed, so delegates (and
@@ -159,6 +186,7 @@ BarWidget {
       var n = String(event.name)
       // Carries the new focus right away; Hyprland.activeToplevel lags it.
       if (n === "activewindowv2") root.peek(Model.normalizeAddress(event.data))
+      if (n === "configreloaded") root.probeLayout()
       if (n.indexOf("window") !== -1 || n.indexOf("workspace") !== -1
           || n.indexOf("monitor") !== -1 || n === "changefloatingmode" || n === "fullscreen") {
         root.bump()
@@ -278,7 +306,7 @@ BarWidget {
     if (any) reaper.restart()
   }
   onTapeChanged: syncRows()
-  Component.onCompleted: { bump(); syncRows(); reapReady = true }
+  Component.onCompleted: { bump(); syncRows(); reapReady = true; probeLayout() }
   property bool reapReady: false
 
   // Closed boxes linger while they shrink away, then get dropped.
@@ -412,7 +440,8 @@ BarWidget {
         property real yOff: 0
         y: yOff
         text: root.shownLabel
-        color: root.decoding ? "#5ff3ff" : root.accentColor
+        color: root.decoding ? "#5ff3ff"
+          : (root.multiScreen && !root.screenFocused(root.segments[0].name) ? root.fg : root.accentColor)
         font.family: root.fontFamily
         font.pixelSize: Math.round(Style.font.body * 1.35)
         font.bold: true
@@ -445,18 +474,71 @@ BarWidget {
       Behavior on width { SpringAnimation { spring: root.springK; damping: root.springD; epsilon: 0.2 } }
       Behavior on height { SpringAnimation { spring: root.springK; damping: root.springD; epsilon: 0.2 } }
 
+      // Later screens' headers: a separator and the workspace number, like the big one. The
+      // focused monitor's number is in the accent colour. Click a number to go there.
+      Repeater {
+        model: root.tape.cols.filter(function (c) { return !!c.header })
+        Item {
+          id: head
+          required property var modelData
+          readonly property real space: root.headerSpace
+          readonly property bool focusedScreen: root.segments.some(function (s) {
+            return s.workspaceId === head.modelData.header.workspaceId && root.screenFocused(s.name)
+          })
+          x: root.vertical ? 0 : modelData.start - root.cfg.gap
+          y: root.vertical ? modelData.start - root.cfg.gap : 0
+          width: root.vertical ? root.thickness : modelData.len + 2 * root.cfg.gap
+          height: root.vertical ? modelData.len + 2 * root.cfg.gap : root.thickness
+
+          Rectangle {
+            x: root.vertical ? 0 : head.space
+            y: root.vertical ? head.space : 0
+            width: root.vertical ? root.thickness : 1
+            height: root.vertical ? 1 : root.thickness
+            color: root.mutedColor
+            opacity: 0.7
+          }
+          Text {
+            id: headText
+            textFormat: Text.PlainText
+            x: root.vertical ? 0 : 2 * head.space + 1
+            y: root.vertical ? 2 * head.space + 1 : 0
+            width: root.vertical ? root.thickness : implicitWidth
+            height: root.vertical ? implicitHeight : root.thickness
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            text: head.modelData.header.label
+            color: head.focusedScreen ? root.accentColor : root.fg
+            font: numMetrics.font
+            Behavior on color { ColorAnimation { duration: 260; easing.type: Easing.InOutSine } }
+            MouseArea {
+              anchors.fill: parent
+              anchors.margins: -3
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.goWorkspace(head.modelData.header.workspaceId)
+            }
+          }
+        }
+      }
+
       // Where a dragged box will land.
       Rectangle {
         visible: root.dragActive && root.dragTarget >= 0 && root.dragTarget !== root.dragFrom && root.dragTarget < root.tape.cols.length
         z: 60
         radius: 1
-        color: root.accentColor
+        // A line where the column will be inserted; when windows swap, an outline round the box
+        // it will swap with.
+        color: root.dragSwaps ? "transparent" : root.accentColor
+        border.width: root.dragSwaps ? 2 : 0
+        border.color: root.accentColor
         readonly property var col: visible ? root.tape.cols[root.dragTarget] : null
         readonly property real edge: col ? (root.dragTarget > root.dragFrom ? col.start + col.len + root.cfg.gap / 2 : col.start - root.cfg.gap / 2) : 0
-        x: root.vertical ? 0 : edge - 1
-        y: root.vertical ? edge - 1 : 0
-        width: root.vertical ? parent.width : 2
-        height: root.vertical ? 2 : parent.height
+        readonly property real from: root.dragSwaps ? (col ? col.start : 0) : edge - 1
+        readonly property real span: root.dragSwaps ? (col ? col.len : 0) : 2
+        x: root.vertical ? 0 : from
+        y: root.vertical ? from : 0
+        width: root.vertical ? parent.width : span
+        height: root.vertical ? span : parent.height
       }
 
       Repeater {
@@ -657,7 +739,7 @@ BarWidget {
             anchors.fill: parent
             // The bar claims left-button presses on every widget (it drags modules around), so a box
             // only ever sees left *clicks*. Dragging a box therefore uses the right button.
-            acceptedButtons: Qt.LeftButton | (root.cfg.boxActions || root.cfg.dragReorder ? Qt.RightButton : 0) | (root.cfg.boxActions ? Qt.MiddleButton : 0)
+            acceptedButtons: Qt.LeftButton | (root.cfg.boxActions || root.dragOn ? Qt.RightButton : 0) | (root.cfg.boxActions ? Qt.MiddleButton : 0)
             hoverEnabled: true
             enabled: !rect.closing
             cursorShape: Qt.PointingHandCursor
@@ -672,7 +754,7 @@ BarWidget {
               fx.play("click", mouse.x, mouse.y)
             }
             onPositionChanged: function (mouse) {
-              if (!root.cfg.dragReorder || !(pressedButtons & Qt.RightButton)) return
+              if (!root.dragOn || !(pressedButtons & Qt.RightButton)) return
               var here = mapToItem(tapeItem, mouse.x, mouse.y)
               var dx = here.x - pressAt.x, dy = here.y - pressAt.y
               if (!moved && Math.abs(root.vertical ? dy : dx) < 6) return
@@ -681,7 +763,7 @@ BarWidget {
               rect.dragging = true
               rect.dragDX = root.vertical ? 0 : dx
               rect.dragDY = root.vertical ? dy : 0
-              root.dragTarget = Model.slotAt(root.tape.cols, root.vertical ? here.y : here.x)
+              root.dragTarget = Model.slotWithin(root.tape.cols, root.vertical ? here.y : here.x, root.dragFrom)
             }
             onReleased: function (mouse) {
               if (!rect.dragging) return
@@ -932,6 +1014,20 @@ BarWidget {
   }
 
   // ---- Drag to reorder ----------------------------------------------------------
+  // With several screens a drag stays on its own screen: columns only swap within a workspace.
+  readonly property bool dragOn: cfg.dragReorder
+  // The scrolling layout reorders columns (swapcol); any other layout swaps the dragged window
+  // with the one it's dropped on. Unknown counts as scrolling, as before.
+  property string layoutName: ""
+  readonly property bool dragSwaps: layoutName !== "" && layoutName !== "scrolling"
+  function probeLayout() { if (!layoutProbe.running) layoutProbe.running = true }
+  Process {
+    id: layoutProbe
+    command: ["hyprctl", "getoption", "general:layout", "-j"]
+    stdout: StdioCollector {
+      onStreamFinished: { var l = Model.parseLayoutOption(text); if (l !== "") root.layoutName = l }
+    }
+  }
   property bool dragActive: false
   property int dragFrom: -1
   property int dragTarget: -1
@@ -955,11 +1051,19 @@ BarWidget {
   }
 
   function reorderColumns(from, to, addr) {
-    if (!cfg.dragReorder) return
+    if (!dragOn) return
     var plan = Model.swapPlan(from, to)
     if (plan.length === 0) return
     var a = addr && addr !== "" ? addr : addressAtColumn(from)
     if (a === "") return
+    if (dragSwaps) {
+      var cmd = Model.swapWindowCommand(addressAtColumn(to), Hyprland.usingLua === true)
+      if (cmd === "") return
+      focusWindow(a)
+      Hyprland.dispatch(cmd)
+      bump()
+      return
+    }
     focusWindow(a)
     var cmds = Model.swapCommands(plan, Hyprland.usingLua === true)
     for (var i = 0; i < cmds.length; i++) Hyprland.dispatch(cmds[i])
@@ -1528,6 +1632,15 @@ BarWidget {
           checked: root.cfg.animStyle === modelData.value
           onPicked: root.saveSetting("animStyle", modelData.value)
         }
+      }
+
+      OptionRow {
+        width: parent.width
+        square: true
+        label: "All screens"
+        description: "Every monitor's workspace, lowest number first"
+        checked: root.cfg.allScreens
+        onPicked: root.saveSetting("allScreens", !root.cfg.allScreens)
       }
 
       OptionRow {

@@ -370,6 +370,59 @@ function buildColumns(clients, monitor, viewport, vertical, activeAddr) {
   })
 }
 
+// ---- Screens ---------------------------------------------------------------
+// Which monitors the widget draws, as segments { name, workspaceId, size, viewport, cross }.
+// `monitors` are plain { name, workspaceId, scale, width, height, x, y } (physical width/height).
+// Normally just the bar's own monitor; with `all`, every monitor showing a regular workspace,
+// lowest workspace number first.
+function screenSegments(monitors, barName, all, vertical) {
+  var out = []
+  for (var i = 0; i < (monitors || []).length; i++) {
+    var m = monitors[i]
+    if (!m) continue
+    var ws = Number(m.workspaceId)
+    var s = Number(m.scale) || 1
+    var w = Number(m.width) / s, h = Number(m.height) / s
+    var x = Number(m.x) || 0, y = Number(m.y) || 0
+    if (!(ws > 0) || !(w > 0) || !(h > 0)) continue
+    if (!all && String(m.name) !== String(barName)) continue
+    out.push({
+      name: String(m.name),
+      workspaceId: ws,
+      size: { width: w, height: h, x: x, y: y },
+      viewport: vertical ? { start: y, end: y + h } : { start: x, end: x + w },
+      cross: vertical ? w : h
+    })
+  }
+  out.sort(function (a, b) { return a.workspaceId - b.workspaceId })
+  return out
+}
+
+// One segment's columns resized by `k`, so a full-height window is equally tall on every screen.
+function scaleColumns(columns, k) {
+  if (k === 1) return columns
+  return (columns || []).map(function (col) {
+    return Object.assign({}, col, {
+      len: col.len * k,
+      windows: col.windows.map(function (w) { return Object.assign({}, w, { off: w.off * k, span: w.span * k }) })
+    })
+  })
+}
+
+// Several segments' columns (`perSegment[i]`, already scaled) joined into one tape. Every segment
+// after the first starts with an empty header column `headerLens[i]` long (tape units) carrying
+// { workspaceId, label }, where the view draws its separator and number.
+function joinSegments(segments, perSegment, headerLens, labels) {
+  var out = []
+  for (var i = 0; i < segments.length; i++) {
+    if (i > 0)
+      out.push({ key: "screen:" + segments[i].name, len: headerLens[i] || 0, visibleFraction: 1, windows: [],
+                 header: { workspaceId: segments[i].workspaceId, label: labels[i] || "" } })
+    out = out.concat(perSegment[i] || [])
+  }
+  return out
+}
+
 // Flat, absolutely-positioned rectangles for the tape, in bar pixels. Rows are
 // keyed by `key` (stable across a group's active-tab changes) so the view can
 // reconcile them and animate each one. Interior edges of stacked windows are
@@ -408,7 +461,7 @@ function layoutTape(columns, o) {
         tabsJson: tabs ? JSON.stringify(tabs) : ""
       })
     }
-    bounds.push({ start: cursor, len: len })
+    bounds.push(col.header ? { start: cursor, len: len, header: col.header } : { start: cursor, len: len })
     cursor += len + gap
   }
   return { items: items, total: Math.max(0, cursor - (items.length ? gap : 0)), cols: bounds }
@@ -621,6 +674,19 @@ function swapCommands(plan, usingLua) {
   return out
 }
 
+// Layouts other than scrolling have no columns to swap: there the dragged window trades places
+// with the one it's dropped on instead. Command that swaps the focused window with `addr`.
+function swapWindowCommand(addr, usingLua) {
+  var a = normalizeAddress(addr)
+  if (!a) return ""
+  return usingLua === true ? 'hl.dsp.window.swap({ target = "address:' + a + '" })' : "swapwindow address:" + a
+}
+
+// `hyprctl getoption general:layout -j` output -> the layout name, or "" if unreadable.
+function parseLayoutOption(text) {
+  try { var o = JSON.parse(text); return typeof o.str === "string" ? o.str : "" } catch (e) { return "" }
+}
+
 // ---- Drag to reorder ---------------------------------------------------------
 // Column index whose centre is nearest to `pos` (px along the bar's axis).
 // `cols` is layoutTape().cols = [{ start, len }].
@@ -632,6 +698,23 @@ function slotAt(cols, pos) {
     if (d < bestDist) { best = i; bestDist = d }
   }
   return best
+}
+
+// The column indices of the screen column `index` is on: { first, last }. With several screens
+// the tape's header columns separate them, and a column can only be swapped within its own.
+function screenRange(cols, index) {
+  var list = cols || []
+  var first = index, last = index
+  while (first > 0 && !list[first - 1].header) first--
+  while (last < list.length - 1 && !list[last + 1].header) last++
+  return { first: first, last: last }
+}
+
+// slotAt() limited to the screen column `from` is on.
+function slotWithin(cols, pos, from) {
+  var r = screenRange(cols, from)
+  if (from < 0 || from >= (cols || []).length) return -1
+  return slotAt(cols.slice(r.first, r.last + 1), pos) + r.first
 }
 
 // The swapcol steps that move a column from index `from` to `to`: ["r", "r", ...] / ["l", ...].
@@ -664,7 +747,8 @@ function resolveSettings(raw) {
     attention: s.attention !== false,
     boxActions: s.boxActions === true,
     dragReorder: s.dragReorder === true,
-    stateMarkers: s.stateMarkers !== false
+    stateMarkers: s.stateMarkers !== false,
+    allScreens: s.allScreens === true
   }
 }
 
@@ -683,7 +767,8 @@ if (typeof module !== "undefined") {
     ANIM_STYLE_ORDER: ANIM_STYLE_ORDER, ANIM_STYLES: ANIM_STYLES, resolveAnimStyle: resolveAnimStyle,
     motionFor: motionFor, attentionLevel: attentionLevel,
     menuItemsFor: menuItemsFor, actionCommand: actionCommand, pickAlertTarget: pickAlertTarget,
-    slotAt: slotAt, swapPlan: swapPlan, swapCommands: swapCommands,
-    rowKeyFor: rowKeyFor, reconcileAlerts: reconcileAlerts, parseNotification: parseNotification, urgentAddress: urgentAddress, matchNotificationWindow: matchNotificationWindow, buildColumns: buildColumns, resolveSettings: resolveSettings
+    slotAt: slotAt, screenRange: screenRange, slotWithin: slotWithin, swapPlan: swapPlan, swapCommands: swapCommands, swapWindowCommand: swapWindowCommand, parseLayoutOption: parseLayoutOption,
+    rowKeyFor: rowKeyFor, reconcileAlerts: reconcileAlerts, parseNotification: parseNotification, urgentAddress: urgentAddress, matchNotificationWindow: matchNotificationWindow, buildColumns: buildColumns, resolveSettings: resolveSettings,
+    screenSegments: screenSegments, scaleColumns: scaleColumns, joinSegments: joinSegments
   }
 }

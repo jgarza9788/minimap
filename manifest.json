@@ -29,7 +29,8 @@
       "attention": true,
       "boxActions": false,
       "dragReorder": false,
-      "stateMarkers": true
+      "stateMarkers": true,
+      "allScreens": false
     },
     "schema": [
       {
@@ -80,6 +81,13 @@
         "max": 12,
         "step": 1,
         "defaultValue": 3
+      },
+      {
+        "key": "allScreens",
+        "type": "boolean",
+        "label": "All screens",
+        "description": "Show the active workspace of every monitor side by side, lowest workspace number first. Dragging a column keeps it on its own screen.",
+        "defaultValue": false
       },
       {
         "key": "showFloating",
