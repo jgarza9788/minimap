@@ -1,0 +1,172 @@
+{
+ "focused_tab_id": "w3:t1",
+ "layouts": [
+  {
+   "area": {
+    "height": 98,
+    "width": 561,
+    "x": 0,
+    "y": 0
+   },
+   "focused_pane_id": "w3:p2",
+   "panes": [
+    {
+     "focused": false,
+     "pane_id": "w3:p1",
+     "rect": {
+      "height": 49,
+      "width": 191,
+      "x": 0,
+      "y": 0
+     }
+    },
+    {
+     "focused": false,
+     "pane_id": "w3:p4",
+     "rect": {
+      "height": 49,
+      "width": 191,
+      "x": 0,
+      "y": 49
+     }
+    },
+    {
+     "focused": true,
+     "pane_id": "w3:p2",
+     "rect": {
+      "height": 49,
+      "width": 370,
+      "x": 191,
+      "y": 0
+     }
+    },
+    {
+     "focused": false,
+     "pane_id": "w3:p3",
+     "rect": {
+      "height": 49,
+      "width": 93,
+      "x": 191,
+      "y": 49
+     }
+    },
+    {
+     "focused": false,
+     "pane_id": "w3:p6",
+     "rect": {
+      "height": 49,
+      "width": 92,
+      "x": 284,
+      "y": 49
+     }
+    },
+    {
+     "focused": false,
+     "pane_id": "w3:p5",
+     "rect": {
+      "height": 49,
+      "width": 185,
+      "x": 376,
+      "y": 49
+     }
+    }
+   ],
+   "splits": [
+    {
+     "direction": "right",
+     "id": "split_0_root",
+     "ratio": 0.34037432,
+     "rect": {
+      "height": 98,
+      "width": 561,
+      "x": 0,
+      "y": 0
+     }
+    },
+    {
+     "direction": "down",
+     "id": "split_1_0",
+     "ratio": 0.5,
+     "rect": {
+      "height": 98,
+      "width": 191,
+      "x": 0,
+      "y": 0
+     }
+    },
+    {
+     "direction": "down",
+     "id": "split_2_1",
+     "ratio": 0.5,
+     "rect": {
+      "height": 98,
+      "width": 370,
+      "x": 191,
+      "y": 0
+     }
+    },
+    {
+     "direction": "right",
+     "id": "split_3_11",
+     "ratio": 0.5,
+     "rect": {
+      "height": 49,
+      "width": 370,
+      "x": 191,
+      "y": 49
+     }
+    },
+    {
+     "direction": "right",
+     "id": "split_4_110",
+     "ratio": 0.5,
+     "rect": {
+      "height": 49,
+      "width": 185,
+      "x": 191,
+      "y": 49
+     }
+    }
+   ],
+   "tab_id": "w3:t1",
+   "workspace_id": "w3",
+   "zoomed": false
+  }
+ ],
+ "panes": [
+  {
+   "terminal_title_stripped": "user@host:~/project",
+   "pane_id": "w3:p1",
+   "agent_status": "unknown"
+  },
+  {
+   "terminal_title_stripped": "user@host:~/project",
+   "label": "server",
+   "pane_id": "w3:p4",
+   "agent_status": "idle"
+  },
+  {
+   "terminal_title_stripped": "Fix the parser",
+   "agent": "claude",
+   "pane_id": "w3:p2",
+   "agent_status": "working"
+  },
+  {
+   "terminal_title_stripped": "pi - project",
+   "agent": "pi",
+   "pane_id": "w3:p3",
+   "agent_status": "blocked"
+  },
+  {
+   "terminal_title_stripped": "",
+   "agent": "codex",
+   "pane_id": "w3:p6",
+   "agent_status": "done"
+  },
+  {
+   "terminal_title_stripped": "vim notes.md",
+   "pane_id": "w3:p5",
+   "agent_status": "unknown"
+  }
+ ]
+}

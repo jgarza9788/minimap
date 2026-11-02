@@ -555,6 +555,116 @@ function parseNotification(line) {
   }
 }
 
+// ---- App panes -------------------------------------------------------------
+// Apps that split a window into panes (herdr, tmux ...) each have a provider in providers/<id>.py
+// that prints its layouts as JSON lines; providers/README.md has the format. A box running one is
+// split into those panes. `key` is the on/off setting.
+var PANE_PROVIDERS = [
+  { id: "herdr", key: "herdrPanes", label: "herdr panes", description: "Split a terminal's box into the panes of its herdr tab" },
+  { id: "tmux", key: "tmuxPanes", label: "tmux panes", description: "Split a terminal's box into the panes of its tmux window" }
+]
+
+// One JSON line from a provider -> its layouts, or null. Entries that don't fit the format are dropped.
+function parsePaneLayouts(line, providerId) {
+  var list = null
+  try { list = JSON.parse(line) } catch (e) { return null }
+  if (!Array.isArray(list)) return null
+  return list.filter(function (e) {
+    return e && e.match && typeof e.match === "object" && e.area && Array.isArray(e.panes)
+  }).map(function (e) { return Object.assign({}, e, { provider: String(providerId || e.provider || "") }) })
+}
+
+// How close a layout's match is to a window: 0 = the window itself, n = n processes below it,
+// -1 = not this window.
+function matchDistance(match, client) {
+  if (match.address) return normalizeAddress(match.address) === client.address ? 0 : -1
+  if (!(client.pid > 0)) return -1
+  if (Number(match.pid) > 0) return Number(match.pid) === client.pid ? 0 : -1
+  var at = (match.pids || []).indexOf(client.pid)
+  return at === -1 ? -1 : at
+}
+
+// { address: layout } for windows some provider has a layout for. When several match one window
+// the one running nearest it wins (a pane provider inside another's pane loses to the outer one).
+function layoutsByAddress(clients, layouts) {
+  var out = {}
+  for (var i = 0; i < (clients || []).length; i++) {
+    var c = clients[i], best = null, bestAt = Infinity
+    for (var j = 0; j < (layouts || []).length; j++) {
+      var d = matchDistance(layouts[j].match, c)
+      if (d >= 0 && d < bestAt) { best = layouts[j]; bestAt = d }
+    }
+    if (best) out[c.address] = best
+  }
+  return out
+}
+
+// Windows with an agent pane that has just started waiting for the user (status "blocked"),
+// shown or in a hidden tab. `seen` is { "<address>|<pane id>": status } from the previous call;
+// returns the new `seen`, the addresses to alert (`raise`) and the addresses where nothing is
+// blocked any more (`settled`), whose agent alert can go. A pane already blocked when first seen counts.
+function paneAlerts(seen, byAddress) {
+  var before = seen || {}, next = {}, raise = [], blockedNow = {}
+  for (var addr in byAddress || {}) {
+    var layout = byAddress[addr]
+    var all = (layout.panes || []).concat(layout.hidden || [])
+    for (var i = 0; i < all.length; i++) {
+      var p = all[i]
+      if (!p || !p.status) continue
+      var key = addr + "|" + (p.id || "#" + i)
+      next[key] = p.status
+      if (p.status === "blocked") blockedNow[addr] = true
+      if (p.status === "blocked" && before[key] !== "blocked" && raise.indexOf(addr) === -1) raise.push(addr)
+    }
+  }
+  var settled = []
+  for (var k in before) {
+    var a = k.substring(0, k.indexOf("|"))
+    if (before[k] === "blocked" && !blockedNow[a] && settled.indexOf(a) === -1) settled.push(a)
+  }
+  return { seen: next, raise: raise, settled: settled }
+}
+
+// The panes drawn for a layout, in paneRects() order: just the focused one when zoomed.
+function shownPanes(layout) {
+  var src = (layout && layout.panes) || []
+  return layout && layout.zoomed === true ? src.filter(function (p) { return p.focused }) : src
+}
+
+// Pane `index` of what paneRects() drew, or null.
+function paneAt(layout, index) {
+  return shownPanes(layout)[index] || null
+}
+
+// A layout scaled into a w x h box: `panes` (each { x, y, w, h, focused, status }) and the
+// `dividers` between them, `gap` wide. Units map by fraction because the box keeps the window's
+// aspect ratio. A zoomed layout is one pane.
+function paneRects(layout, w, h, gap) {
+  var empty = { panes: [], dividers: [] }
+  var area = layout && layout.area
+  if (!area || !(area.width > 0) || !(area.height > 0) || !(w > 0) || !(h > 0)) return empty
+  var ax = Number(area.x) || 0, ay = Number(area.y) || 0
+  var src = shownPanes(layout)
+  if (layout.zoomed === true)
+    src = src.map(function (p) {
+      return { x: ax, y: ay, width: area.width, height: area.height, focused: true, status: p.status }
+    })
+  var fx = w / area.width, fy = h / area.height
+  var g = Math.max(0, Number(gap) || 0)
+  var panes = [], dividers = []
+  for (var i = 0; i < src.length; i++) {
+    var p = src[i]
+    var x0 = (p.x - ax) * fx, y0 = (p.y - ay) * fy
+    var x1 = (p.x + p.width - ax) * fx, y1 = (p.y + p.height - ay) * fy
+    var right = p.x + p.width < ax + area.width, bottom = p.y + p.height < ay + area.height
+    panes.push({ x: x0, y: y0, w: Math.max(0, x1 - x0), h: Math.max(0, y1 - y0), focused: p.focused === true,
+                 status: typeof p.status === "string" ? p.status : "" })
+    if (right) dividers.push({ x: x1 - g / 2, y: y0, w: g, h: y1 - y0 })
+    if (bottom) dividers.push({ x: x0, y: y1 - g / 2, w: x1 - x0, h: g })
+  }
+  return { panes: panes, dividers: dividers }
+}
+
 // ---- Box actions -----------------------------------------------------------
 // Rows of the right-click box menu. `win` = { tabbed, floating, pinned, fullscreen }.
 // Pin only works on floating windows (Hyprland: "does not qualify to be pinned").
@@ -664,7 +774,10 @@ function resolveSettings(raw) {
     attention: s.attention !== false,
     boxActions: s.boxActions === true,
     dragReorder: s.dragReorder === true,
-    stateMarkers: s.stateMarkers !== false
+    stateMarkers: s.stateMarkers !== false,
+    paneStatus: s.paneStatus !== false,
+    paneAlerts: s.paneAlerts !== false,
+    paneProviders: PANE_PROVIDERS.filter(function (p) { return s[p.key] !== false }).map(function (p) { return p.id })
   }
 }
 
@@ -684,6 +797,7 @@ if (typeof module !== "undefined") {
     motionFor: motionFor, attentionLevel: attentionLevel,
     menuItemsFor: menuItemsFor, actionCommand: actionCommand, pickAlertTarget: pickAlertTarget,
     slotAt: slotAt, swapPlan: swapPlan, swapCommands: swapCommands,
-    rowKeyFor: rowKeyFor, reconcileAlerts: reconcileAlerts, parseNotification: parseNotification, urgentAddress: urgentAddress, matchNotificationWindow: matchNotificationWindow, buildColumns: buildColumns, resolveSettings: resolveSettings
+    rowKeyFor: rowKeyFor, reconcileAlerts: reconcileAlerts, parseNotification: parseNotification, urgentAddress: urgentAddress, matchNotificationWindow: matchNotificationWindow, buildColumns: buildColumns, resolveSettings: resolveSettings,
+    PANE_PROVIDERS: PANE_PROVIDERS, parsePaneLayouts: parsePaneLayouts, layoutsByAddress: layoutsByAddress, paneRects: paneRects, paneAt: paneAt, paneAlerts: paneAlerts
   }
 }
