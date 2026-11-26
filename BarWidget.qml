@@ -581,25 +581,11 @@ BarWidget {
             try { if (regAddr !== "") root.unregisterItem(regAddr, rect); root.hoverLeft(regAddr) } catch (e) {}
           }
 
-          // Style "letter": a t in the middle of the box.
-          Text {
-            textFormat: Text.PlainText
-            anchors.centerIn: parent
-            opacity: rect.tabbed && root.cfg.groupStyle === "letter" ? 1 : 0
-            visible: opacity > 0.01
-            Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.InOutSine } }
-            text: "t"
-            color: rect.ink
-            font.family: root.fontFamily
-            font.pixelSize: Math.max(8, Math.round(rect.height * 0.8))
-            font.bold: true
-          }
-
-          // Style "tabbar": one nub per tab along the top edge, the visible
+          // One nub per tab along the top edge, the visible
           // tab dark, the rest faint. Each nub hovers/clicks as its window.
           Row {
             id: tabRow
-            opacity: rect.tabbed && root.cfg.groupStyle === "tabbar" ? 1 : 0
+            opacity: rect.tabbed ? 1 : 0
             visible: opacity > 0.01
             Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.InOutSine } }
             x: 2
@@ -850,7 +836,7 @@ BarWidget {
     if (JSON.stringify(r.attention) !== JSON.stringify(attention)) attention = r.attention
     if (r.otherLevel !== otherLevel) otherLevel = r.otherLevel
   }
-  onColumnsChanged: reconcile()
+  onColumnsChanged: { reconcile(); resolvePeek() }
   onWorkspaceIdChanged: { reconcile(); if (ready) wsFx.play() }
 
   // A notification nobody owns still deserves a nudge on the number.
@@ -1028,6 +1014,7 @@ BarWidget {
   }
   function unregisterItem(addr, item) {
     if (items[addr] && items[addr].item === item) { delete items[addr]; itemsRev++ }
+    if (hoverAddr === addr) { hoverClear.stop(); hoverAddr = "" }
   }
   function hoverEntered(addr) { hoverClear.stop(); hoverAddr = addr }
   function hoverLeft(addr) { if (hoverAddr === addr) hoverClear.restart() }
@@ -1036,14 +1023,41 @@ BarWidget {
   Timer { id: hoverClear; interval: 140; onTriggered: root.hoverAddr = "" }
   Timer { id: peekTimer; interval: 1800; onTriggered: root.peekAddr = "" }
 
+  // An address peeked before `columns` knows it; shown once it resolves.
+  property string pendingPeek: ""
+  function inColumns(addr) {
+    for (var i = 0; i < columns.length; i++)
+      for (var j = 0; j < columns[i].windows.length; j++) {
+        var w = columns[i].windows[j]
+        if (w.address === addr) return true
+        if (w.tabs)
+          for (var k = 0; k < w.tabs.length; k++)
+            if (w.tabs[k].address === addr) return true
+      }
+    return false
+  }
   function peek(addr) {
     if (!ready || addr === "") return
+    hoverClear.stop()
+    hoverAddr = ""   // a new focus beats a stale hover
     peekAddr = addr
+    pendingPeek = inColumns(addr) ? "" : addr
+    peekTimer.interval = pendingPeek !== "" ? 3000 : 1800
     peekTimer.restart()
+  }
+  function resolvePeek() {
+    if (pendingPeek !== "" && peekAddr === pendingPeek && inColumns(pendingPeek)) {
+      pendingPeek = ""
+      peekTimer.interval = 1800
+      peekTimer.restart()
+    }
   }
   onActiveAddrChanged: { peek(activeAddr); reconcile() }
 
-  readonly property string shownAddr: hoverAddr !== "" ? hoverAddr : peekAddr
+  readonly property string shownAddr: {
+    var _rev = itemsRev
+    return hoverAddr !== "" && items[hoverAddr] ? hoverAddr : peekAddr
+  }
   readonly property var shownWin: {
     if (shownAddr === "") return null
     for (var i = 0; i < columns.length; i++)
@@ -1086,7 +1100,9 @@ BarWidget {
 
   PopupWindow {
     id: tip
-    readonly property bool wanted: root.shownWin !== null && root.shownItem !== null
+    readonly property bool floating: root.cfg.focusLabel === "floating"
+    readonly property bool wanted: root.cfg.focusLabel !== "off"
+      && root.shownWin !== null && root.shownItem !== null
       && root.labelText !== "" && !root.settingsOpen
     readonly property real pad: Style.space(6)
     // Spring feel shared by every motion: stiffness / damping (0..1, lower = bouncier).
@@ -1112,7 +1128,7 @@ BarWidget {
     visible: root.QsWindow.window !== null && (wanted || pill.presence > 0.003)
     color: "transparent"
     implicitWidth: root.vertical ? maxPillW + pad * 2 : along
-    implicitHeight: root.vertical ? along : pill.height + pad
+    implicitHeight: root.vertical ? along : pill.height + pad + (floating ? pill.floatGap : 0)
     // Only the pill takes input; the rest of the window is click-through.
     mask: Region { item: pill }
 
@@ -1143,11 +1159,14 @@ BarWidget {
       var m = Style.space(4)
       if (!root.vertical) {
         var wx = clamp(o.x - Style.space(12), m, win.width - along - m)
-        var wy = bottom ? -implicitHeight : win.height
+        // The bar surface spans the whole screen; only a strip barSize thick is
+        // the bar. Hang the popup off that strip's inner edge, not the window's.
+        var wy = bottom ? win.height - root.barSize - implicitHeight : root.barSize
         anchor.rect.x = Math.round(wx)
         anchor.rect.y = Math.round(wy)
         pill.targetX = clamp(c.x - wx - pill.targetW / 2, 0, along - pill.targetW)
-        pill.targetY = bottom ? pad : 0
+        // A floating pill leaves a gap to the bar; a tab sits flush against it.
+        pill.targetY = bottom ? pad : (floating ? pill.floatGap : 0)
       } else {
         var vx = left ? o.x + root.width + m : o.x - implicitWidth - m
         var vy = clamp(o.y - Style.space(12), m, win.height - along - m)
@@ -1164,7 +1183,8 @@ BarWidget {
       property real targetY: 0
       // Flare = radius of the concave corners where the tab meets the bar;
       // corner = radius of its free top corners. Vertical bars get a plain pill.
-      readonly property real flare: root.vertical ? 0 : Style.space(10)
+      readonly property real flare: root.vertical || tip.floating ? 0 : Style.space(10)
+      readonly property real floatGap: Style.space(8)
       readonly property real corner: Math.min(Style.space(13), height / 2)
       readonly property real targetW: Math.min(tip.maxPillW, metrics.width + iconBox.width + flare * 2 + Style.space(40))
 
@@ -1202,7 +1222,8 @@ BarWidget {
       // the tab sinks while it fades. It rises out of the bar edge: parked a
       // full height behind it (the popup window clips it there).
       property real presence: tip.wanted ? 1 : 0
-      readonly property real lift: root.vertical ? 0 : (1 - presence) * (tip.bottom ? height : -height)
+      readonly property real lift: root.vertical ? 0
+        : (1 - presence) * (tip.floating ? (tip.bottom ? 1 : -1) * Style.space(10) : (tip.bottom ? height : -height))
       opacity: Math.max(0, Math.min(1, presence * 2.2))
 
       Behavior on presence { SpringAnimation { spring: tip.springK; damping: tip.springD; epsilon: 0.002 } }
@@ -1213,7 +1234,7 @@ BarWidget {
       // Fills the gap under the tab while the spring overshoots; clipped away
       // by the popup window otherwise.
       Rectangle {
-        visible: !root.vertical
+        visible: !root.vertical && !tip.floating
         x: pill.flare
         width: parent.width - pill.flare * 2
         height: Style.space(12)
@@ -1356,280 +1377,132 @@ BarWidget {
     bar: root.bar
     owner: root
     open: root.settingsOpen
-    contentWidth: fittedContentWidth(Style.space(260))
+    contentWidth: fittedContentWidth(Style.space(300))
     contentHeight: fittedContentHeight(settingsColumn.implicitHeight)
 
     Column {
       id: settingsColumn
       anchors.fill: parent
-      spacing: Style.space(6)
+      spacing: Style.space(8)
 
-      Text {
-
-        textFormat: Text.PlainText
-        text: "MINIMAP"
-        color: root.fg
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.subtitle
-        font.bold: true
-      }
-
-      Repeater {
-        model: Model.NUMBER_STYLE_ORDER.map(function (id) {
-          return { value: id, label: Model.NUMBER_STYLES[id].label, description: Model.NUMBER_STYLES[id].description }
-        })
-
-        Item {
-          id: row
-          required property var modelData
-          readonly property bool checked: root.cfg.numberStyle === modelData.value
-          width: parent.width
-          implicitHeight: Math.max(dot.height, texts.implicitHeight) + Style.space(6)
-
-          Rectangle {
-            id: dot
-            anchors.left: parent.left
-            anchors.top: parent.top
-            anchors.topMargin: Style.space(3)
-            width: Style.space(14)
-            height: width
-            radius: width / 2
-            color: row.checked ? Color.accent : "transparent"
-            border.width: 2
-            border.color: row.checked ? Color.accent : Qt.darker(root.fg, 1.3)
-            Behavior on color { ColorAnimation { duration: 200; easing.type: Easing.InOutSine } }
-            Behavior on border.color { ColorAnimation { duration: 200; easing.type: Easing.InOutSine } }
-          }
-          Column {
-            id: texts
-            anchors.left: dot.right
-            anchors.leftMargin: Style.space(8)
-            anchors.right: parent.right
-            Text {
-              textFormat: Text.PlainText
-              text: row.modelData.label
-              color: root.fg
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-              font.bold: row.checked
-            }
-            Text {
-              textFormat: Text.PlainText
-              text: row.modelData.description
-              color: Qt.darker(root.fg, 1.35)
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-            }
-          }
-          MouseArea {
-            anchors.fill: parent
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.saveSetting("numberStyle", row.modelData.value)
-          }
+      // ---- Header
+      Row {
+        spacing: Style.space(8)
+        Rectangle {
+          anchors.verticalCenter: parent.verticalCenter
+          width: Style.space(8)
+          height: width
+          radius: width / 2
+          color: root.accentColor
+        }
+        Text {
+          textFormat: Text.PlainText
+          anchors.verticalCenter: parent.verticalCenter
+          text: "Minimap"
+          color: root.fg
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.subtitle
+          font.bold: true
         }
       }
 
-      Rectangle {
+      SectionHeader { text: "Workspace number" }
+      Segmented {
         width: parent.width
-        height: 1
-        color: root.mutedColor
-        opacity: 0.4
+        current: root.cfg.numberStyle
+        options: Model.NUMBER_STYLE_ORDER.map(function (id) {
+          return { value: id, label: Model.NUMBER_STYLES[id].label, glyph: Model.formatWorkspace(4, id) }
+        })
+        onPicked: function (v) { root.saveSetting("numberStyle", v) }
       }
 
+      SectionHeader { text: "Focus label" }
+      Segmented {
+        width: parent.width
+        current: root.cfg.focusLabel
+        options: Model.FOCUS_LABEL_ORDER.map(function (id) {
+          return { value: id, label: Model.FOCUS_LABELS[id].label }
+        })
+        onPicked: function (v) { root.saveSetting("focusLabel", v) }
+      }
       Text {
-
         textFormat: Text.PlainText
-        text: "Tabbed windows"
-        color: root.fg
+        width: parent.width
+        wrapMode: Text.WordWrap
+        text: Model.FOCUS_LABELS[root.cfg.focusLabel].description
+        color: root.mutedText
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
-        font.bold: true
       }
 
-      Repeater {
-        model: Model.GROUP_STYLE_ORDER.map(function (id) {
-          return { value: id, label: Model.GROUP_STYLES[id].label, description: Model.GROUP_STYLES[id].description }
-        })
-
-        Item {
-          id: grow
-          required property var modelData
-          readonly property bool checked: root.cfg.groupStyle === modelData.value
-          width: parent.width
-          implicitHeight: Math.max(gdot.height, gtexts.implicitHeight) + Style.space(6)
-
-          Rectangle {
-            id: gdot
-            anchors.left: parent.left
-            anchors.top: parent.top
-            anchors.topMargin: Style.space(3)
-            width: Style.space(14)
-            height: width
-            radius: width / 2
-            color: grow.checked ? Color.accent : "transparent"
-            border.width: 2
-            border.color: grow.checked ? Color.accent : Qt.darker(root.fg, 1.3)
-            Behavior on color { ColorAnimation { duration: 200; easing.type: Easing.InOutSine } }
-            Behavior on border.color { ColorAnimation { duration: 200; easing.type: Easing.InOutSine } }
-          }
-          Column {
-            id: gtexts
-            anchors.left: gdot.right
-            anchors.leftMargin: Style.space(8)
-            anchors.right: parent.right
-            Text {
-              textFormat: Text.PlainText
-              text: grow.modelData.label
-              color: root.fg
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-              font.bold: grow.checked
-            }
-            Text {
-              textFormat: Text.PlainText
-              text: grow.modelData.description
-              color: Qt.darker(root.fg, 1.35)
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-            }
-          }
-          MouseArea {
-            anchors.fill: parent
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.saveSetting("groupStyle", grow.modelData.value)
+      SectionHeader { text: "Animation" }
+      Flow {
+        width: parent.width
+        spacing: Style.space(6)
+        Repeater {
+          model: Model.ANIM_STYLE_ORDER.map(function (id) {
+            return { value: id, label: Model.ANIM_STYLES[id].label }
+          })
+          Chip {
+            required property var modelData
+            label: modelData.label
+            checked: root.cfg.animStyle === modelData.value
+            onPicked: root.saveSetting("animStyle", modelData.value)
           }
         }
       }
-
-      Rectangle {
-        width: parent.width
-        height: 1
-        color: root.mutedColor
-        opacity: 0.4
-      }
-
       Text {
-
         textFormat: Text.PlainText
-        text: "Animation"
-        color: root.fg
+        width: parent.width
+        wrapMode: Text.WordWrap
+        text: Model.ANIM_STYLES[root.cfg.animStyle].description
+        color: root.mutedText
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
-        font.bold: true
       }
 
-      Repeater {
-        model: Model.ANIM_STYLE_ORDER.map(function (id) {
-          return { value: id, label: Model.ANIM_STYLES[id].label, description: Model.ANIM_STYLES[id].description }
-        })
-
-        OptionRow {
-          required property var modelData
-          width: parent.width
-          label: modelData.label
-          description: modelData.description
-          checked: root.cfg.animStyle === modelData.value
-          onPicked: root.saveSetting("animStyle", modelData.value)
-        }
-      }
-
-      OptionRow {
+      SectionHeader { text: "Behavior" }
+      SwitchRow {
         width: parent.width
-        square: true
+        label: "Show floating windows"
+        description: "Include floating windows in the tape"
+        checked: root.cfg.showFloating
+        onPicked: root.saveSetting("showFloating", !root.cfg.showFloating)
+      }
+      SwitchRow {
+        width: parent.width
         label: "Attention cues"
         description: "Urgent windows and notifications: minor and critical"
         checked: root.cfg.attention
         onPicked: root.saveSetting("attention", !root.cfg.attention)
       }
-
-      OptionRow {
+      SwitchRow {
         width: parent.width
-        square: true
-        label: "Reduce motion"
-        description: "No bounce, pulses or effects; alerts stay visible"
-        checked: root.cfg.reduceMotion
-        onPicked: root.saveSetting("reduceMotion", !root.cfg.reduceMotion)
-      }
-
-      OptionRow {
-        width: parent.width
-        square: true
         label: "State markers"
         description: "Marks for fullscreen, pinned and floating windows"
         checked: root.cfg.stateMarkers
         onPicked: root.saveSetting("stateMarkers", !root.cfg.stateMarkers)
       }
-
-      OptionRow {
+      SwitchRow {
         width: parent.width
-        square: true
+        label: "Reduce motion"
+        description: "No bounce, pulses or effects; alerts stay visible"
+        checked: root.cfg.reduceMotion
+        onPicked: root.saveSetting("reduceMotion", !root.cfg.reduceMotion)
+      }
+      SwitchRow {
+        width: parent.width
         label: "Box actions"
-        description: "Right-click a box for a window menu, middle-click closes it"
+        description: "Right-click a box for a window menu; middle-click closes it"
         checked: root.cfg.boxActions
         onPicked: root.saveSetting("boxActions", !root.cfg.boxActions)
       }
-
-      OptionRow {
+      SwitchRow {
         width: parent.width
-        square: true
         label: "Drag to reorder"
         description: "Hold the right mouse button on a box and drag sideways"
         checked: root.cfg.dragReorder
         onPicked: root.saveSetting("dragReorder", !root.cfg.dragReorder)
-      }
-
-      Rectangle {
-        width: parent.width
-        height: 1
-        color: root.mutedColor
-        opacity: 0.4
-      }
-
-      Item {
-        id: floatRow
-        width: parent.width
-        implicitHeight: Math.max(box.height, floatText.implicitHeight) + Style.space(6)
-
-        Rectangle {
-          id: box
-          anchors.left: parent.left
-          anchors.top: parent.top
-          anchors.topMargin: Style.space(0)
-          width: Style.space(14)
-          height: width
-          radius: 3
-          color: root.cfg.showFloating ? Color.accent : "transparent"
-          border.width: 2
-          border.color: root.cfg.showFloating ? Color.accent : Qt.darker(root.fg, 1.3)
-          Behavior on color { ColorAnimation { duration: 200; easing.type: Easing.InOutSine } }
-          Behavior on border.color { ColorAnimation { duration: 200; easing.type: Easing.InOutSine } }
-        }
-        Column {
-          id: floatText
-          anchors.left: box.right
-          anchors.leftMargin: Style.space(8)
-          anchors.right: parent.right
-          Text {
-            textFormat: Text.PlainText
-            text: "Show floating windows"
-            color: root.fg
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.body
-            font.bold: root.cfg.showFloating
-          }
-          Text {
-            textFormat: Text.PlainText
-            text: "Include floating windows in the tape"
-            color: Qt.darker(root.fg, 1.35)
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-          }
-        }
-        MouseArea {
-          anchors.fill: parent
-          cursorShape: Qt.PointingHandCursor
-          onClicked: root.saveSetting("showFloating", !root.cfg.showFloating)
-        }
       }
     }
   }
@@ -1674,66 +1547,225 @@ BarWidget {
     }
   }
 
-  // A selectable settings row: radio dot (or checkbox when `square`).
-  component OptionRow: Item {
-    id: opt
-    property string label: ""
-    property string description: ""
-    property bool checked: false
-    property bool square: false
-    signal picked()
+  readonly property color mutedText: Qt.rgba(fg.r, fg.g, fg.b, 0.6)
 
-    implicitHeight: Math.max(mark.height, optTexts.implicitHeight) + Style.space(6)
+  // Small caps section title with a hairline running out to the edge.
+  component SectionHeader: Item {
+    id: sh
+    property string text: ""
+    width: parent ? parent.width : 0
+    implicitHeight: shText.implicitHeight + Style.space(6)
+    Text {
+      id: shText
+      textFormat: Text.PlainText
+      anchors.left: parent.left
+      anchors.bottom: parent.bottom
+      anchors.bottomMargin: Style.space(1)
+      text: sh.text.toUpperCase()
+      color: root.mutedText
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+      font.bold: true
+      font.letterSpacing: 1.2
+    }
+    Rectangle {
+      anchors.left: shText.right
+      anchors.leftMargin: Style.space(8)
+      anchors.right: parent.right
+      anchors.verticalCenter: shText.verticalCenter
+      height: 1
+      color: root.fg
+      opacity: 0.12
+    }
+  }
+
+  // Pick one of a few options: a track with a sliding highlight. An option may
+  // carry a `glyph` (a sample, drawn large above its label).
+  component Segmented: Item {
+    id: seg
+    property var options: []
+    property string current: ""
+    signal picked(string value)
+
+    readonly property int index: {
+      for (var i = 0; i < options.length; i++) if (options[i].value === current) return i
+      return 0
+    }
+    readonly property bool hasGlyph: options.length > 0 && options[0].glyph !== undefined
+    readonly property real pad: Style.space(3)
+    readonly property real segW: options.length > 0 ? (width - pad * 2) / options.length : 0
+    implicitHeight: (hasGlyph ? Style.space(46) : Style.space(30)) + pad * 2
 
     Rectangle {
       anchors.fill: parent
-      anchors.margins: -Style.space(2)
-      radius: Style.space(5)
-      color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, optArea.pressed ? 0.18 : (optArea.containsMouse ? 0.08 : 0))
-      Behavior on color { ColorAnimation { duration: 100 } }
+      radius: Style.space(9)
+      color: root.fg
+      opacity: 0.07
     }
+    Rectangle {
+      x: seg.pad + seg.index * seg.segW
+      y: seg.pad
+      width: seg.segW
+      height: parent.height - seg.pad * 2
+      radius: Style.space(7)
+      color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.22)
+      border.width: 1
+      border.color: root.accentColor
+      Behavior on x { SpringAnimation { spring: 4; damping: 0.5; epsilon: 0.2 } }
+    }
+    Row {
+      x: seg.pad
+      y: seg.pad
+      Repeater {
+        model: seg.options
+        Item {
+          id: cell
+          required property var modelData
+          required property int index
+          readonly property bool on: index === seg.index
+          width: seg.segW
+          height: seg.height - seg.pad * 2
+
+          Column {
+            anchors.centerIn: parent
+            spacing: Style.space(1)
+            Text {
+              textFormat: Text.PlainText
+              visible: seg.hasGlyph
+              anchors.horizontalCenter: parent.horizontalCenter
+              text: cell.modelData.glyph !== undefined ? cell.modelData.glyph : ""
+              color: cell.on ? root.accentColor : root.fg
+              font.family: root.fontFamily
+              font.pixelSize: Math.round(Style.font.subtitle * 1.15)
+              font.bold: true
+              Behavior on color { ColorAnimation { duration: 150 } }
+            }
+            Text {
+              textFormat: Text.PlainText
+              anchors.horizontalCenter: parent.horizontalCenter
+              text: cell.modelData.label
+              color: cell.on ? root.fg : root.mutedText
+              font.family: root.fontFamily
+              font.pixelSize: seg.hasGlyph ? Style.font.caption : Style.font.body
+              font.bold: cell.on
+              Behavior on color { ColorAnimation { duration: 150 } }
+            }
+          }
+          MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: seg.picked(cell.modelData.value)
+          }
+        }
+      }
+    }
+  }
+
+  // A pill-shaped single choice, for options too many for a segmented track.
+  component Chip: Rectangle {
+    id: chip
+    property string label: ""
+    property bool checked: false
+    signal picked()
+
+    implicitWidth: chipText.implicitWidth + Style.space(22)
+    implicitHeight: Style.space(26)
+    radius: height / 2
+    color: checked ? Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.22)
+                   : Qt.rgba(root.fg.r, root.fg.g, root.fg.b, chipArea.containsMouse ? 0.14 : 0.07)
+    border.width: 1
+    border.color: checked ? root.accentColor : "transparent"
+    Behavior on color { ColorAnimation { duration: 120 } }
+    Behavior on border.color { ColorAnimation { duration: 120 } }
+
+    Text {
+      id: chipText
+      textFormat: Text.PlainText
+      anchors.centerIn: parent
+      text: chip.label
+      color: chip.checked ? root.fg : root.mutedText
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.body
+      font.bold: chip.checked
+    }
+    MouseArea {
+      id: chipArea
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: chip.picked()
+    }
+  }
+
+  // A labelled on/off row with a sliding switch.
+  component SwitchRow: Item {
+    id: sw
+    property string label: ""
+    property string description: ""
+    property bool checked: false
+    signal picked()
+
+    implicitHeight: Math.max(swTexts.implicitHeight, track.height) + Style.space(8)
 
     Rectangle {
-      id: mark
-      anchors.left: parent.left
-      anchors.top: parent.top
-      anchors.topMargin: Style.space(3)
-      width: Style.space(14)
-      height: width
-      radius: opt.square ? 3 : width / 2
-      color: opt.checked ? Color.accent : "transparent"
-      border.width: 2
-      border.color: opt.checked ? Color.accent : Qt.darker(root.fg, 1.3)
-      Behavior on color { ColorAnimation { duration: 200; easing.type: Easing.InOutSine } }
-      Behavior on border.color { ColorAnimation { duration: 200; easing.type: Easing.InOutSine } }
+      anchors.fill: parent
+      anchors.leftMargin: -Style.space(4)
+      anchors.rightMargin: -Style.space(4)
+      radius: Style.space(6)
+      color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, swArea.pressed ? 0.14 : (swArea.containsMouse ? 0.06 : 0))
+      Behavior on color { ColorAnimation { duration: 100 } }
     }
     Column {
-      id: optTexts
-      anchors.left: mark.right
-      anchors.leftMargin: Style.space(8)
-      anchors.right: parent.right
+      id: swTexts
+      anchors.left: parent.left
+      anchors.right: track.left
+      anchors.rightMargin: Style.space(10)
+      anchors.verticalCenter: parent.verticalCenter
       Text {
         textFormat: Text.PlainText
-        text: opt.label
+        width: parent.width
+        elide: Text.ElideRight
+        text: sw.label
         color: root.fg
         font.family: root.fontFamily
         font.pixelSize: Style.font.body
-        font.bold: opt.checked
       }
       Text {
         textFormat: Text.PlainText
-        text: opt.description
-        color: Qt.darker(root.fg, 1.35)
+        width: parent.width
+        wrapMode: Text.WordWrap
+        text: sw.description
+        color: root.mutedText
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
       }
     }
+    Rectangle {
+      id: track
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      width: Style.space(32)
+      height: Style.space(18)
+      radius: height / 2
+      color: sw.checked ? root.accentColor : Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.18)
+      Behavior on color { ColorAnimation { duration: 180; easing.type: Easing.InOutSine } }
+      Rectangle {
+        id: knob
+        width: parent.height - Style.space(4)
+        height: width
+        radius: width / 2
+        y: Style.space(2)
+        x: sw.checked ? parent.width - width - Style.space(2) : Style.space(2)
+        color: sw.checked ? Qt.color(root.bgHex) : root.fg
+        Behavior on x { SpringAnimation { spring: 5; damping: 0.55; epsilon: 0.2 } }
+      }
+    }
     MouseArea {
-      id: optArea
+      id: swArea
       anchors.fill: parent
       hoverEnabled: true
       cursorShape: Qt.PointingHandCursor
-      onClicked: opt.picked()
+      onClicked: sw.picked()
     }
   }
 }

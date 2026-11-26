@@ -18,14 +18,14 @@ hover it. It also tells you when a window wants your attention: **amber** for mi
 |---|---|
 | ![label](previews/label.png) | **Focus label.** Hover a box or change focus and a tab pops out of the bar with the app icon and window title. It glides and stretches between boxes. |
 | ![stack](previews/stack.png) | **Stacked windows** keep their own slice of a box, with a gap between them. |
-| ![group](previews/group.png) | **Tabbed (grouped) windows** become one box with a tab per window; click a tab to jump to it. Or pick a plain **t** in the box ![letter](previews/letter.png). |
+| ![group](previews/group.png) | **Tabbed (grouped) windows** become one box with a tab per window; click a tab to jump to it. |
 | ![minor](previews/minor.png) | **Minor alerts** (urgent windows, low/normal notifications) turn the box amber and pulse a soft glow. |
 | ![critical](previews/critical.png) | **Critical alerts** turn it red, louder and faster. Focus the window and the alert clears with a little flourish. |
 | ![other](previews/other.png) | **Alert on another workspace?** The workspace number lights up so you know where to look. |
 | ![numbers](previews/numbers.png) | **Number styles:** `9`, `IX`, `九`, `.::::` |
 | ![menu](previews/menu.png) | **Box menu** (opt-in): right-click a box for focus, float, fullscreen, pin, move to workspace, close. |
 | ![workspaces](previews/move-to-workspace.png) | **Move to workspace** from the same menu - pick 1-10. |
-| ![markers](previews/markers.png) | **State markers:** a solid outline for floating windows, a dot for pinned, corner brackets for fullscreen. |
+| ![markers](previews/markers.png) | **State markers:** a dotted outline for floating windows, a dot for pinned, corner brackets for fullscreen. |
 
 ## Install
 
@@ -79,7 +79,7 @@ they are keys on the widget entry.
 | Key | Values | Default | |
 |---|---|---|---|
 | `numberStyle` | `numbers` `roman` `japanese` `dots` | `numbers` | how the workspace number is written |
-| `groupStyle` | `tabbar` `letter` | `tabbar` | how a tabbed window looks |
+| `focusLabel` | `tab` `floating` `off` | `tab` | the focus label: joined to the bar, a detached pill, or disabled |
 | `animStyle` | `smooth` `cyberpunk` `fun` `magic` `ripple` | `smooth` | motion and effects (below) |
 | `attention` | `true` `false` | `true` | alert cues for urgent windows and notifications |
 | `reduceMotion` | `true` `false` | `false` | critically damped springs, no swell, no pulses or effect styles; alerts glow steadily |

@@ -1,10 +1,9 @@
 import QtQuick
-import QtQuick.Shapes
 
 // Tiny window-state marks drawn inside a box, no font needed:
 //   pinned      a dot in the top-right corner
 //   fullscreen  four corner brackets
-//   floating    a solid outline just inside the edge
+//   floating    a dotted outline just inside the edge
 // Hidden when the box is too small to carry them.
 Item {
   id: marks
@@ -20,22 +19,37 @@ Item {
   readonly property real fm: 2.2                               // inset of the floating outline's centre line
   readonly property real arm: Math.max(2, Math.min(4, Math.min(width, height) / 3))
 
-  // floating: solid outline
-  Shape {
-    anchors.fill: parent
-    visible: marks.roomy && marks.floating && !marks.fullscreen
-    ShapePath {
-      strokeColor: marks.ink
-      strokeWidth: 1.8
-      fillColor: "transparent"
-      strokeStyle: ShapePath.SolidLine
-      joinStyle: ShapePath.RoundJoin
-      startX: marks.fm
-      startY: marks.fm
-      PathLine { x: marks.width - marks.fm; y: marks.fm }
-      PathLine { x: marks.width - marks.fm; y: marks.height - marks.fm }
-      PathLine { x: marks.fm; y: marks.height - marks.fm }
-      PathLine { x: marks.fm; y: marks.fm }
+  // floating: dotted outline. Drawn as real round dots, evenly spaced with one on
+  // every corner, so the ring is symmetric at any box size (a dashed stroke
+  // restarts its pattern per side and renders square dots at this scale).
+  readonly property real dotSize: 1.8
+  readonly property real dotGap: 4.2
+  readonly property var floatDots: {
+    if (!roomy || !floating || fullscreen) return []
+    var x0 = fm, y0 = fm, x1 = width - fm, y1 = height - fm
+    var w = x1 - x0, h = y1 - y0
+    var nx = Math.max(1, Math.round(w / dotGap)), ny = Math.max(1, Math.round(h / dotGap))
+    var pts = []
+    for (var i = 0; i < nx; i++) {
+      pts.push({ x: x0 + w * i / nx, y: y0 })     // top, left to right
+      pts.push({ x: x1 - w * i / nx, y: y1 })     // bottom, right to left
+    }
+    for (var j = 0; j < ny; j++) {
+      pts.push({ x: x1, y: y0 + h * j / ny })     // right, top to bottom
+      pts.push({ x: x0, y: y1 - h * j / ny })     // left, bottom to top
+    }
+    return pts
+  }
+  Repeater {
+    model: marks.floatDots
+    Rectangle {
+      required property var modelData
+      x: modelData.x - marks.dotSize / 2
+      y: modelData.y - marks.dotSize / 2
+      width: marks.dotSize
+      height: width
+      radius: width / 2
+      color: marks.ink
     }
   }
 

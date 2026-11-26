@@ -24,7 +24,7 @@
       "maxWidth": 800,
       "gap": 3,
       "showFloating": false,
-      "groupStyle": "tabbar",
+      "focusLabel": "tab",
       "animStyle": "smooth",
       "attention": true,
       "boxActions": false,
@@ -90,21 +90,26 @@
         "defaultValue": false
       },
       {
-        "key": "groupStyle",
+        "key": "focusLabel",
         "type": "enum",
-        "label": "Tabbed windows",
-        "description": "How a Hyprland group (tabbed windows) is drawn.",
-        "defaultValue": "tabbar",
+        "label": "Focus label",
+        "description": "The label that names a window when you focus or hover it.",
+        "defaultValue": "tab",
         "options": [
           {
-            "value": "tabbar",
-            "label": "Tab bar",
-            "description": "A row of tabs along the top of the box."
+            "value": "tab",
+            "label": "Tab",
+            "description": "Joined to the bar edge, rising out of it."
           },
           {
-            "value": "letter",
-            "label": "Letter \"t\"",
-            "description": "A t in the middle of the box."
+            "value": "floating",
+            "label": "Floating",
+            "description": "A detached pill that floats just off the bar."
+          },
+          {
+            "value": "off",
+            "label": "Disabled",
+            "description": "No focus label."
           }
         ]
       },

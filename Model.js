@@ -645,13 +645,15 @@ function swapPlan(from, to) {
   return out
 }
 
-var GROUP_STYLE_ORDER = ["tabbar", "letter"]
-var GROUP_STYLES = {
-  tabbar: { label: "Tab bar", description: "A row of tabs along the top of the box" },
-  letter: { label: "Letter \"t\"", description: "A t in the middle of the box" }
+// The focus label: a tab joined to the bar, a detached floating pill, or nothing.
+var FOCUS_LABEL_ORDER = ["tab", "floating", "off"]
+var FOCUS_LABELS = {
+  tab: { label: "Tab", description: "Joined to the bar edge, rising out of it" },
+  floating: { label: "Floating", description: "A detached pill that floats just off the bar" },
+  off: { label: "Disabled", description: "No focus label" }
 }
-function resolveGroupStyle(id) {
-  return Object.prototype.hasOwnProperty.call(GROUP_STYLES, id) ? id : "tabbar"
+function resolveFocusLabel(id) {
+  return Object.prototype.hasOwnProperty.call(FOCUS_LABELS, id) ? id : "tab"
 }
 
 function resolveSettings(raw) {
@@ -661,7 +663,7 @@ function resolveSettings(raw) {
     maxWidth: clampInt(s.maxWidth, 60, 2000, 800),
     gap: clampInt(s.gap, 0, 12, 3),
     showFloating: s.showFloating === true,
-    groupStyle: resolveGroupStyle(String(s.groupStyle || "")),
+    focusLabel: resolveFocusLabel(String(s.focusLabel || "")),
     animStyle: resolveAnimStyle(String(s.animStyle || "")),
     attention: s.attention !== false,
     reduceMotion: s.reduceMotion === true,
@@ -681,7 +683,7 @@ if (typeof module !== "undefined") {
     NUMBER_STYLE_ORDER: NUMBER_STYLE_ORDER, NUMBER_STYLES: NUMBER_STYLES,
     resolveNumberStyle: resolveNumberStyle, formatWorkspace: formatWorkspace,
     groupedOf: groupedOf, collapseGroups: collapseGroups,
-    GROUP_STYLE_ORDER: GROUP_STYLE_ORDER, GROUP_STYLES: GROUP_STYLES, resolveGroupStyle: resolveGroupStyle,
+    FOCUS_LABEL_ORDER: FOCUS_LABEL_ORDER, FOCUS_LABELS: FOCUS_LABELS, resolveFocusLabel: resolveFocusLabel,
     groupColumns: groupColumns, layoutTape: layoutTape,
     ANIM_STYLE_ORDER: ANIM_STYLE_ORDER, ANIM_STYLES: ANIM_STYLES, resolveAnimStyle: resolveAnimStyle,
     motionFor: motionFor, attentionLevel: attentionLevel,

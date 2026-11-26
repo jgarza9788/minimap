@@ -37,7 +37,9 @@ ok("focused member wins", M.collapseGroups(grp, "0xa3")[0].address === "0xa3");
 ok("ungrouped has no tabs", folded[1].tabs === null);
 const gb = M.buildColumns(grp, { width: 2000, height: 1000, x: 0, y: 0 }, null, false, "0xa1");
 ok("one column per group, focus via any tab", gb.length === 2 && gb[0].windows.length === 1 && gb[0].windows[0].focused);
-ok("group style fallback", M.resolveGroupStyle("x") === "tabbar" && M.resolveGroupStyle("letter") === "letter");
+ok("focus label: tab default, floating/off accepted, junk falls back", M.resolveSettings({}).focusLabel === "tab"
+  && M.resolveSettings({ focusLabel: "floating" }).focusLabel === "floating" && M.resolveSettings({ focusLabel: "off" }).focusLabel === "off"
+  && M.resolveSettings({ focusLabel: "bogus" }).focusLabel === "tab" && M.FOCUS_LABEL_ORDER.length === 3);
 ok("groupedOf normalizes", M.groupedOf({ grouped: ["ABC", "0xdef", "zz!"] }).join() === "0xabc,0xdef");
 
 // layoutTape
