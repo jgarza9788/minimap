@@ -96,12 +96,68 @@ BarWidget {
   readonly property string activeAddr: Model.normalizeAddress(
     Hyprland.activeToplevel ? Hyprland.activeToplevel.address : "")
 
-  readonly property var rawColumns: {
+  // Tiled windows, plus floating ones when asked or when the workspace has nothing else.
+  readonly property var clientSel: {
     var _dep = tick
-    if (workspaceId < 0 || !monitorSize) return []
+    if (workspaceId < 0 || !monitorSize) return { clients: [], floatingOnly: false, raw: [] }
     var tops = Hyprland.toplevels ? Hyprland.toplevels.values : []
-    var clients = Model.eligibleClients(tops, workspaceId, cfg.showFloating, liveAddrs)
-    return Model.buildColumns(clients, monitorSize, viewportRange, vertical, activeAddr)
+    var all = Model.eligibleClients(tops, workspaceId, true, liveAddrs)
+    return Model.selectClients(all, cfg.showFloating, monitorSize, vertical)
+  }
+  // Every window floats: equal slots, and the floating mark would be on every box.
+  readonly property bool floatingOnly: clientSel.floatingOnly
+
+  // Floating desktop: the windows as fractions of the screen (back to front by
+  // focus recency) and as app icons in a stable order.
+  readonly property var floatWinsRaw: {
+    if (!floatingOnly || !monitorSize) return []
+    var raw = clientSel.raw || []
+    var out = []
+    for (var i = 0; i < raw.length; i++) {
+      var c = raw[i]
+      out.push({
+        address: c.address, hist: c.focusHistory,
+        x: (c.x - monitorSize.x) / monitorSize.width, y: (c.y - monitorSize.y) / monitorSize.height,
+        w: c.w / monitorSize.width, h: c.h / monitorSize.height,
+        focused: c.address === activeAddr
+      })
+    }
+    out.sort(function (a, b) { return b.hist - a.hist })   // oldest first, newest on top
+    return out
+  }
+  readonly property var floatAppsRaw: {
+    if (!floatingOnly) return []
+    var raw = clientSel.raw || []
+    var out = []
+    for (var i = 0; i < raw.length; i++) {
+      var c = raw[i]
+      out.push({ address: c.address, appClass: c.appClass, pinned: c.pinned === true, fullscreen: c.fullscreen === true,
+                 focused: c.address === activeAddr })
+    }
+    out.sort(function (a, b) { return String(a.address).localeCompare(String(b.address)) })
+    return out
+  }
+  // Swap the models only on a real change, so icon delegates (and hover) survive polling.
+  property var floatWins: []
+  property var floatApps: []
+  property string floatWinsSig: ""
+  property string floatAppsSig: ""
+  onFloatWinsRawChanged: {
+    var sig = JSON.stringify(floatWinsRaw)
+    if (sig === floatWinsSig) return
+    floatWinsSig = sig
+    floatWins = floatWinsRaw
+  }
+  onFloatAppsRawChanged: {
+    var sig = JSON.stringify(floatAppsRaw)
+    if (sig === floatAppsSig) return
+    floatAppsSig = sig
+    floatApps = floatAppsRaw
+  }
+
+  readonly property var rawColumns: {
+    if (workspaceId < 0 || !monitorSize) return []
+    return Model.buildColumns(clientSel.clients, monitorSize, viewportRange, vertical, activeAddr)
   }
 
   // Only swap the model when the drawn data really changed, so delegates (and
@@ -228,7 +284,7 @@ BarWidget {
 
   // The tape: flat absolutely-positioned rows, reconciled into a ListModel so
   // each box keeps its delegate and glides when windows open, close or resize.
-  readonly property var tape: Model.layoutTape(columns, {
+  readonly property var tape: Model.layoutTape(floatingOnly ? [] : columns, {
     scale: scale, gap: cfg.gap, stackGap: Math.max(cfg.gap, 3), vertical: vertical
   })
   property string tapeSig: ""
@@ -431,9 +487,155 @@ BarWidget {
       Behavior on color { ColorAnimation { duration: 260 } }
     }
 
+    // Floating desktop: a little screen with the windows drawn where they are,
+    // a gap and a divider, then one icon per window.
+    GridLayout {
+      id: floatView
+      Layout.alignment: Qt.AlignCenter
+      visible: root.floatingOnly
+      columns: root.vertical ? 1 : 3
+      rowSpacing: Style.space(10)
+      columnSpacing: Style.space(10)
+
+      Rectangle {
+        id: screenBox
+        readonly property real aspect: root.monitorSize ? root.monitorSize.width / root.monitorSize.height : 16 / 9
+        Layout.alignment: Qt.AlignCenter
+        Layout.preferredWidth: root.vertical ? root.thickness : Math.round(root.thickness * aspect)
+        Layout.preferredHeight: root.vertical ? Math.round(root.thickness / aspect) : root.thickness
+        radius: 3
+        color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.06)
+        border.width: 1
+        border.color: root.mutedColor
+        // Inside the 1px border.
+        readonly property real iw: width - 2
+        readonly property real ih: height - 2
+
+        Repeater {
+          model: root.floatWins
+
+          Rectangle {
+            required property var modelData
+            readonly property real wpx: Math.max(3, modelData.w * screenBox.iw)
+            readonly property real hpx: Math.max(3, modelData.h * screenBox.ih)
+            x: 1 + Math.max(0, Math.min(screenBox.iw - wpx, modelData.x * screenBox.iw))
+            y: 1 + Math.max(0, Math.min(screenBox.ih - hpx, modelData.y * screenBox.ih))
+            width: wpx
+            height: hpx
+            radius: 1
+            color: modelData.focused ? root.accentColor : Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.55)
+            border.width: 1
+            border.color: Qt.rgba(Qt.color(root.bgHex).r, Qt.color(root.bgHex).g, Qt.color(root.bgHex).b, 0.6)
+            Behavior on x { SpringAnimation { spring: root.springK; damping: root.springD; epsilon: 0.2 } }
+            Behavior on y { SpringAnimation { spring: root.springK; damping: root.springD; epsilon: 0.2 } }
+            Behavior on width { SpringAnimation { spring: root.springK; damping: root.springD; epsilon: 0.2 } }
+            Behavior on height { SpringAnimation { spring: root.springK; damping: root.springD; epsilon: 0.2 } }
+            Behavior on color { ColorAnimation { duration: 200 } }
+          }
+        }
+      }
+
+      Rectangle {
+        Layout.alignment: Qt.AlignCenter
+        Layout.preferredWidth: root.vertical ? root.thickness : 1
+        Layout.preferredHeight: root.vertical ? 1 : root.thickness
+        color: root.mutedColor
+        opacity: 0.7
+      }
+
+      GridLayout {
+        Layout.alignment: Qt.AlignCenter
+        columns: root.vertical ? 1 : Math.max(1, root.floatApps.length)
+        rowSpacing: Style.space(6)
+        columnSpacing: Style.space(6)
+
+        Repeater {
+          model: root.floatApps
+
+          Item {
+            id: appIcon
+            required property var modelData
+            readonly property string addr: modelData.address
+            readonly property int attn: root.cfg.attention ? (root.attention[addr] || 0) : 0
+            Layout.preferredWidth: root.thickness
+            Layout.preferredHeight: root.thickness
+            opacity: modelData.focused || iconArea.containsMouse ? 1 : 0.7
+            Behavior on opacity { NumberAnimation { duration: 150 } }
+
+            Component.onCompleted: root.registerItem(addr, appIcon, 1)
+            Component.onDestruction: {
+              try { root.unregisterItem(addr, appIcon); root.hoverLeft(addr) } catch (e) {}
+            }
+
+            // Focused window: a soft accent plate behind its icon.
+            Rectangle {
+              anchors.fill: parent
+              anchors.margins: -2
+              radius: 4
+              color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, appIcon.modelData.focused ? 0.28 : 0)
+              border.width: 1
+              border.color: appIcon.modelData.focused ? root.accentColor : "transparent"
+              Behavior on color { ColorAnimation { duration: 200 } }
+              Behavior on border.color { ColorAnimation { duration: 200 } }
+            }
+            Image {
+              id: appImg
+              anchors.fill: parent
+              source: root.resolveIcon(appIcon.modelData.appClass)
+              sourceSize.width: Math.round(width * Screen.devicePixelRatio)
+              sourceSize.height: Math.round(height * Screen.devicePixelRatio)
+              fillMode: Image.PreserveAspectFit
+              asynchronous: true
+              smooth: true
+              mipmap: true
+              visible: status === Image.Ready
+            }
+            Text {
+              textFormat: Text.PlainText
+              anchors.centerIn: parent
+              visible: appImg.status !== Image.Ready
+              text: appIcon.modelData.appClass !== "" ? appIcon.modelData.appClass.charAt(0).toUpperCase() : "\u2022"
+              color: appIcon.modelData.focused ? root.accentColor : root.mutedColor
+              font.family: root.fontFamily
+              font.pixelSize: Math.round(root.thickness * 0.8)
+              font.bold: true
+            }
+            // Alert cue: amber (minor) or red (critical) dot.
+            Rectangle {
+              visible: appIcon.attn > 0
+              anchors.right: parent.right
+              anchors.top: parent.top
+              anchors.rightMargin: -2
+              anchors.topMargin: -2
+              width: 6
+              height: 6
+              radius: 3
+              color: appIcon.attn >= 2 ? root.urgentColor : "#f2b134"
+            }
+            MouseArea {
+              id: iconArea
+              anchors.fill: parent
+              anchors.margins: -3
+              hoverEnabled: true
+              acceptedButtons: Qt.LeftButton | Qt.RightButton
+              cursorShape: Qt.PointingHandCursor
+              onClicked: function (mouse) {
+                if (mouse.button === Qt.RightButton) {
+                  if (root.cfg.boxActions) root.openBoxMenu(appIcon, appIcon.addr, false, true, appIcon.modelData.pinned, appIcon.modelData.fullscreen)
+                } else root.focusWindow(appIcon.addr)
+              }
+              onEntered: root.hoverEntered(appIcon.addr)
+              onExited: root.hoverLeft(appIcon.addr)
+            }
+          }
+        }
+      }
+    }
+
     Item {
       id: tapeView
       Layout.alignment: Qt.AlignCenter
+      visible: !root.floatingOnly
       clip: true
       implicitWidth: root.vertical ? root.thickness : Math.min(tapeItem.width, root.cfg.maxWidth)
       implicitHeight: root.vertical ? Math.min(tapeItem.height, root.cfg.maxWidth) : root.thickness
@@ -549,7 +751,7 @@ BarWidget {
             visible: root.cfg.stateMarkers && !rect.closing
             pinned: rect.pinned
             fullscreen: rect.fullscreen
-            floating: rect.floating
+            floating: rect.floating && !root.floatingOnly
             ink: rect.ink
           }
 

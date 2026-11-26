@@ -83,6 +83,41 @@ function eligibleClients(toplevels, workspaceId, includeFloating, live) {
   return out
 }
 
+// Pick which clients the tape draws. Tiled windows always; floating ones only
+// when `showFloating` is set. A workspace with floating windows and no tiled
+// ones (a floating desktop) shows them regardless, or the tape would be empty.
+// There the windows have no layout order and their size means little, so they
+// become equal slots across the monitor in a stable order (by address: unlike x
+// position or focus recency it doesn't reshuffle while you drag or refocus).
+// Returns { clients, floatingOnly, raw }; `raw` keeps the windows' real geometry
+// (floating-only mode draws them on a little screen).
+function selectClients(all, showFloating, monitor, vertical) {
+  var list = all || []
+  var tiled = list.filter(function (c) { return c.floating !== true })
+  if (tiled.length > 0 || list.length === 0)
+    return { clients: showFloating === true ? list : tiled, floatingOnly: false, raw: [] }
+
+  var mx = monitor ? Number(monitor.x) || 0 : 0
+  var my = monitor ? Number(monitor.y) || 0 : 0
+  var mw = monitor ? Number(monitor.width) : 0
+  var mh = monitor ? Number(monitor.height) : 0
+  var sorted = list.slice().sort(function (a, b) { return String(a.address).localeCompare(String(b.address)) })
+  if (!(mw > 0) || !(mh > 0)) return { clients: sorted, floatingOnly: true, raw: list }
+
+  var slot = (vertical ? mh : mw) / sorted.length
+  return {
+    floatingOnly: true,
+    raw: list,
+    clients: sorted.map(function (c, i) {
+      var o = {}
+      for (var k in c) o[k] = c[k]
+      if (vertical) { o.x = mx; o.w = mw; o.y = my + i * slot; o.h = slot }
+      else { o.y = my; o.h = mh; o.x = mx + i * slot; o.w = slot }
+      return o
+    })
+  }
+}
+
 // Left-to-right for a horizontal bar, top-to-bottom for a vertical one. The
 // off-axis coordinate is the tiebreaker so stacked splits keep a stable order.
 function orderByPosition(clients, vertical) {
@@ -675,7 +710,7 @@ function resolveSettings(raw) {
 
 if (typeof module !== "undefined") {
   module.exports = {
-    normalizeAddress: normalizeAddress, eligibleClients: eligibleClients,
+    normalizeAddress: normalizeAddress, eligibleClients: eligibleClients, selectClients: selectClients,
     orderByPosition: orderByPosition, overlapFraction: overlapFraction,
     sizeFraction: sizeFraction, clampInt: clampInt,
     THEME_COLOR_KEYS: THEME_COLOR_KEYS, parseThemeColors: parseThemeColors,

@@ -83,7 +83,7 @@ they are keys on the widget entry.
 | `animStyle` | `smooth` `cyberpunk` `fun` `magic` `ripple` | `smooth` | motion and effects (below) |
 | `attention` | `true` `false` | `true` | alert cues for urgent windows and notifications |
 | `reduceMotion` | `true` `false` | `false` | critically damped springs, no swell, no pulses or effect styles; alerts glow steadily |
-| `showFloating` | `true` `false` | `false` | include floating windows in the map |
+| `showFloating` | `true` `false` | `false` | include floating windows in the map (a workspace where *every* window floats switches to a little screen with the windows drawn where they are, then a divider and one app icon per window) |
 | `stateMarkers` | `true` `false` | `true` | marks for fullscreen / pinned / floating windows |
 | `boxActions` | `true` `false` | `false` | right-click box menu and middle-click close |
 | `dragReorder` | `true` `false` | `false` | right-drag a box to reorder its column |

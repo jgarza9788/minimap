@@ -144,4 +144,24 @@ ok("swapCommands: junk refused", M.swapCommands(["r", "x"], true).length === 0 &
   console.log("ok live filter")
 })()
 
+// ---- floating desktop ------------------------------------------------------
+{
+  const mon = { x: 0, y: 0, width: 1000, height: 500 };
+  const mk = (address, floating, x) => ({ address, floating, x, y: 40, w: 300, h: 200 });
+  const mixed = [mk("0xb", false, 0), mk("0xa", true, 500)];
+  const sel1 = M.selectClients(mixed, false, mon, false);
+  ok("select: tiled kept, floats hidden by default", sel1.clients.length === 1 && sel1.clients[0].address === "0xb" && !sel1.floatingOnly);
+  ok("select: showFloating keeps both", M.selectClients(mixed, true, mon, false).clients.length === 2);
+  const floats = [mk("0xc", true, 700), mk("0xa", true, 10), mk("0xb", true, 300)];
+  const sel2 = M.selectClients(floats, false, mon, false);
+  ok("select: all-floating shows floats even with showFloating off", sel2.floatingOnly && sel2.clients.length === 3);
+  ok("select: floating-only order is by address, not x", sel2.clients.map(c => c.address).join() === "0xa,0xb,0xc");
+  ok("select: floating-only slots are equal and tile the monitor", sel2.clients.every((c, i) => Math.abs(c.w - 1000 / 3) < 1e-9 && Math.abs(c.x - i * 1000 / 3) < 1e-9 && c.h === 500 && c.y === 0));
+  const moved = floats.map(c => Object.assign({}, c, { x: 900 - c.x }));
+  ok("select: dragging a window doesn't reorder", M.selectClients(moved, false, mon, false).clients.map(c => c.address).join() === "0xa,0xb,0xc");
+  const vsel = M.selectClients(floats, false, { x: 0, y: 0, width: 1000, height: 900 }, true);
+  ok("select: vertical bar slots along y", vsel.clients.every((c, i) => Math.abs(c.h - 300) < 1e-9 && Math.abs(c.y - i * 300) < 1e-9 && c.w === 1000));
+  ok("select: empty workspace stays empty", M.selectClients([], false, mon, false).clients.length === 0 && !M.selectClients([], false, mon, false).floatingOnly);
+}
+
 process.exit(failed ? 1 : 0);
